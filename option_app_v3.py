@@ -53,7 +53,7 @@ inizializza_stato()
 
 # Usiamo un contenitore con bordo per raggruppare visivamente tutti gli input
 with st.container(border=True):	
-	st.subheader("Calcolo dello Strike Price")
+	st.subheader("🎯 Calcolo dello Strike Price")
 		
 	sott, strike, var =st.columns([0.35, 0.35, 0.30])
 	asset_price = sott.number_input("Prezzo Sottostante", min_value=0.0, value=6000.0, step=1.0, key="price")
@@ -75,7 +75,7 @@ with st.container(border=True):
 
 	
 with st.container(border=True):
-	st.subheader("Analisi")
+	st.subheader("💹 Analisi")
 
 	col3, col4, col5, col6 = st.columns([0.20, 0.35, 0.15, 0.30])
 	
@@ -139,7 +139,7 @@ with st.container(border=True):
 
 # Contenitore con bordo per mettere in risalto i risultati principali
 with st.container(border=True):
-    st.subheader("🎯 Ingresso a mercato")
+    st.subheader("📉 Ingresso a mercato")
     col1, col2 = st.columns(2)
     with col1:
         st.metric(
