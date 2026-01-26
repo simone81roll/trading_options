@@ -112,7 +112,7 @@ inizializza_stato()
 
 # --- 1. SEZIONE CALCOLO SPREAD (NUOVA) ---
 # La inseriamo per prima o dopo l'analisi base, a tua scelta. Qui la metto in evidenza.
-calcolatore_bull_put_numerico()
+calcolatore_bull_put_avanzato()
 
 # --- 2. SEZIONE CALCOLO CLASSICO (TUO CODICE PRECEDENTE) ---
 with st.container(border=True):	
@@ -209,4 +209,5 @@ with st.container(border=True):
             value=f"{number_contract:.2f}",
             help="N. contratti = Premio Potenziale / Prezzo Opzione"
         )
+
 
