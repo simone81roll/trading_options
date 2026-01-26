@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 # Funzione per inizializzare lo stato della sessione, se non è già presente
 def inizializza_stato():
     if 'rendimento_atteso' not in st.session_state:
@@ -227,6 +226,7 @@ with st.container(border=True):
             value=f"{number_contract:.2f}",
             help="Quanti contratti puoi acquistare con il premio calcolato."
         )
+
 
 
 
