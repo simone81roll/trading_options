@@ -68,9 +68,9 @@ def assistente_bull_put_multi_rischio():
 
         col_prezzi1, col_prezzi2 = st.columns(2)
         with col_prezzi1:
-            p_venduta = st.number_input("Premio Put Venduta ($)", value=25.0, key="p_v")
+            p_venduta = st.number_input("Premio Put Venduta ($)", value=20.0, key="p_v")
         with col_prezzi2:
-            p_prot = st.number_input("Costo Put Protezione ($)", value=5.0, key="p_p")
+            p_prot = st.number_input("Costo Put Protezione ($)", value=15.0, key="p_p")
         
         credito_netto_usd = p_venduta - p_prot
         rischio_unit_usd = (strike_v - strike_p) - credito_netto_usd
@@ -107,7 +107,7 @@ def assistente_bull_put_multi_rischio():
             st.caption(f"Rischio reale: € {rischio_effettivo_75:.2f}")
 
         st.divider()
-        st.markdown(f"**Nota Tecnica:** Con lo spread 100 ({strike_v}/{strike_p}), il tuo 'pavimento' di sicurezza è a {strike_p}. Se l'indice scende sotto quel livello, la perdita non aumenta più.")
+        st.info(f"**Nota Tecnica:** Con lo spread 100 ({strike_v}/{strike_p}), il tuo 'pavimento' di sicurezza è a {strike_p}. Se l'indice scende sotto quel livello, la perdita non aumenta più.")
 
 # --- IMPOSTAZIONI DELLA PAGINA ---
 st.set_page_config(layout="wide")
@@ -219,6 +219,7 @@ with st.container(border=True):
             value=f"{number_contract:.2f}",
             help="Quanti contratti puoi acquistare con il premio calcolato."
         )
+
 
 
 
