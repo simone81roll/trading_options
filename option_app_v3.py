@@ -78,8 +78,8 @@ def assistente_bull_put_multi_rischio():
             st.info(f"💡 **Configurazione:** Vendi Put **{strike_v}** | Compra Put **{strike_p}**")
 
         with col_spr2:
-            p_venduta = st.number_input("Premio Put Venduta ($)", value=25.0)
-            p_prot = st.number_input("Costo Put Prot. ($)", value=5.0)
+            p_venduta = st.number_input("Premio Put Venduta ($)", value=19.0)
+            p_prot = st.number_input("Costo Put Prot. ($)", value=15.0)
 
         # --- 3. CALCOLI TECNICI ---
         credito_netto_usd = p_venduta - p_prot
@@ -232,6 +232,7 @@ with st.container(border=True):
             value=f"{number_contract:.2f}",
             help="Quanti contratti puoi acquistare con il premio calcolato."
         )
+
 
 
 
