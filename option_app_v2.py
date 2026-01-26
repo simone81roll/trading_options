@@ -39,107 +39,70 @@ def get_distance_color(diff_percent):
         return "🌟"
 
 # --- NUOVA FUNZIONE CALCOLATORE SPREAD (Senza Grafici) ---
-def calcolatore_bull_put_numerico():
+def calcolatore_bull_put_avanzato():
     with st.container(border=True):
-        st.subheader("🛡️ Calcolatore Bull Put Spread (Dati Numerici)")
-        st.markdown("Inserisci i dati delle due gambe per calcolare il rischio e il rendimento.")
-
-        # --- INPUT DATI ---
-        col1, col2, col3 = st.columns(3)
+        st.subheader("🤖 Assistente Strategia Bull Put")
         
-        with col1:
-            st.markdown("##### 🔴 Gamba Venduta (Short)")
-            strike_short = st.number_input("Strike Venduto", value=6350.0, step=10.0, format="%.2f")
-            price_short = st.number_input("Premio Incassato", value=25.42, step=0.1, format="%.2f")
+        # --- INPUT INIZIALI ---
+        col_inp1, col_inp2, col_inp3 = st.columns(3)
+        with col_inp1:
+            prezzo_sottostante = st.number_input("Prezzo Attuale US500", value=6950.0, step=1.0)
+            cambio_eurusd = st.number_input("Cambio EUR/USD", value=1.08, step=0.01, help="Necessario per convertire i $ di US500 in € del tuo conto")
+        with col_inp2:
+            capitale_totale = st.number_input("Tuo Capitale Totale (€)", value=1000.0, step=100.0)
+        with col_inp3:
+            distanza_safety = st.slider("Distanza Strike (%)", 1.0, 10.0, 5.0) / 100
+
+        # --- LOGICA DI CONSIGLIO AUTOMATICO ---
+        # 1. Calcolo Strike Venduto (consigliato al -5%)
+        strike_venduto_sugg = prezzo_sottostante * (1 - distanza_safety)
+        # Arrotondiamo a 5 o 10 punti (tipico degli strike US500)
+        strike_venduto_sugg = round(strike_venduto_sugg / 5) * 5
         
-        with col2:
-            st.markdown("##### 🟢 Gamba Acquistata (Long)")
-            strike_long = st.number_input("Strike Protezione", value=6250.0, step=10.0, format="%.2f")
-            price_long = st.number_input("Costo Protezione", value=5.00, step=0.1, format="%.2f")
+        # 2. Impostiamo uno spread standard (es. 100 punti di larghezza per efficienza)
+        strike_protezione_sugg = strike_venduto_sugg - 100
 
-        with col3:
-            st.markdown("##### ⚙️ Dettagli Ordine")
-            n_lotti = st.number_input("Numero Lotti", value=12, step=1)
-            moltiplicatore = st.number_input("Moltiplicatore", value=1, help="1 per AvaOptions")
+        st.info(f"💡 **Consiglio Strategia:** Strike Venduto: **{strike_venduto_sugg}** | Strike Protezione: **{strike_protezione_sugg}**")
 
-        # --- CALCOLI MATEMATICI ---
-        # 1. Credito Netto (Guadagno Massimo) per unità
-        net_credit_unit = price_short - price_long
-        total_max_profit = net_credit_unit * n_lotti * moltiplicatore
-
-        # 2. Rischio Massimo (Larghezza spread - Credito netto)
-        spread_width = strike_short - strike_long
-        max_risk_unit = spread_width - net_credit_unit
-        total_max_loss = max_risk_unit * n_lotti * moltiplicatore
-
-        # 3. Break-Even
-        breakeven = strike_short - net_credit_unit
-        
-        # 4. ROI (Rendimento su Capitale a Rischio)
-        roi = (total_max_profit / total_max_loss * 100) if total_max_loss != 0 else 0
-
+        # --- DETTAGLI PREZZI (Inseriti manualmente dopo aver visto AvaOptions) ---
         st.divider()
+        c1, c2 = st.columns(2)
+        with c1:
+            prezzo_put_venduta = st.number_input("Premio Put Venduta ($)", value=25.0)
+        with c2:
+            prezzo_put_prot = st.number_input("Costo Put Protezione ($)", value=5.0)
 
-        # --- VISUALIZZAZIONE KPI ---
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("Guadagno Massimo (Incasso)", f"€ {total_max_profit:,.2f}", delta="Scenario Migliore")
-        k2.metric("Perdita Massima (Rischio)", f"€ -{total_max_loss:,.2f}", delta="Scenario Peggiore", delta_color="inverse")
-        k3.metric("Break-Even Point", f"{breakeven:,.2f}", help="Sopra questo prezzo non perdi nulla")
-        k4.metric("ROI Potenziale", f"{roi:.2f}%", help="Rendimento sul capitale bloccato a margine")
+        # --- CALCOLO LOTTI BASATO SUL RISCHIO (50% CAPITALE) ---
+        # Rischio massimo tollerato in €
+        rischio_max_eur = capitale_totale * 0.50
+        rischio_max_usd = rischio_max_eur * cambio_eurusd
+        
+        # Rischio per singolo lotto in $ (Larghezza spread - credito netto)
+        credito_netto_unit_usd = prezzo_put_venduta - prezzo_put_prot
+        larghezza_spread = strike_venduto_sugg - strike_protezione_sugg
+        rischio_unit_usd = larghezza_spread - credito_netto_unit_usd
+        
+        # Numero lotti suggeriti
+        if rischio_unit_usd > 0:
+            lotti_suggeriti = int(rischio_max_usd / rischio_unit_usd)
+        else:
+            lotti_suggeriti = 0
 
+        # --- RISULTATI FINALI ---
         st.divider()
-
-        # --- SIMULATORE PREZZO E TABELLA SCENARI ---
-        st.subheader("🔍 Verifica Puntuale")
+        res1, res2, res3 = st.columns(3)
         
-        sim_col1, sim_col2 = st.columns([1, 2])
+        res1.metric("Lotti Suggeriti", f"{lotti_suggeriti}")
         
-        with sim_col1:
-            st.markdown("**Simula un prezzo a scadenza:**")
-            sim_price = st.number_input("Prezzo Sottostante Ipotetico", value=float(strike_short), step=10.0)
-            
-            # Logica calcolo puntuale
-            if sim_price >= strike_short:
-                pnl_sim = total_max_profit
-                status = "Profitto Massimo 🏆"
-                color_box = "#d4edda" # Verde chiaro
-                text_color = "#155724"
-            elif sim_price <= strike_long:
-                pnl_sim = -total_max_loss
-                status = "Perdita Massima 🛡️ (Tappata)"
-                color_box = "#f8d7da" # Rosso chiaro
-                text_color = "#721c24"
-            else:
-                # Siamo nel mezzo dello spread
-                loss_per_share = (strike_short - sim_price) - net_credit_unit
-                pnl_sim = -(loss_per_share * n_lotti * moltiplicatore)
-                # Potrebbe essere profitto o perdita a seconda del break even
-                if pnl_sim > 0:
-                    status = "Profitto Parziale ⚠️"
-                    color_box = "#fff3cd" # Giallo
-                    text_color = "#856404"
-                else:
-                    status = "Perdita Parziale ⚠️"
-                    color_box = "#fff3cd"
-                    text_color = "#856404"
+        # Calcolo guadagno/perdita finale in €
+        guadagno_max_eur = (credito_netto_unit_usd * lotti_suggeriti) / cambio_eurusd
+        perdita_max_eur = (rischio_unit_usd * lotti_suggeriti) / cambio_eurusd
+        
+        res2.metric("Vincita Massima stimata (€)", f"€ {guadagno_max_eur:.2f}")
+        res3.metric("Rischio Reale (€)", f"€ {perdita_max_eur:.2f}")
 
-            st.markdown(f"""
-            <div style="background-color:{color_box}; color:{text_color}; padding: 15px; border-radius: 5px; text-align: center;">
-                <h3 style="margin:0;">€ {pnl_sim:,.2f}</h3>
-                <p style="margin:0;">{status}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with sim_col2:
-            st.markdown("**Tabella di Sintesi (Che succede se...?)**")
-            data_scenari = {
-                "Scenario": ["Mercato Sale o Stabile (> Strike Venduto)", "Mercato Scende un po' (Al Break-Even)", "Crollo Totale (Sotto Protezione)"],
-                "Prezzo Sottostante": [f"> {strike_short:,.0f}", f"{breakeven:,.2f}", f"< {strike_long:,.0f}"],
-                "Risultato (P&L)": [f"€ {total_max_profit:,.2f} (Max Win)", "€ 0.00 (Pareggio)", f"€ -{total_max_loss:,.2f} (Max Loss)"]
-            }
-            df_scenari = pd.DataFrame(data_scenari)
-            st.table(df_scenari)
-
+        if perdita_max_eur > rischio_max_eur:
+            st.warning("Attenzione: Il rischio calcolato supera leggermente il budget a causa dell'arrotondamento lotti.")
 # --- CONFIGURAZIONE PAGINA E MAIN LOOP ---
 st.set_page_config(page_title="Trading Opzioni", layout="wide", page_icon="📈")
 st.title(":chart_with_upwards_trend: Trading in opzioni")
@@ -246,3 +209,4 @@ with st.container(border=True):
             value=f"{number_contract:.2f}",
             help="N. contratti = Premio Potenziale / Prezzo Opzione"
         )
+
