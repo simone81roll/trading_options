@@ -45,9 +45,10 @@ def get_distance_color(diff_percent):
     else:
         return "🌟"
 
-def assistente_bull_put_dinamico():
+def assistente_bull_put_multi_rischio():
     with st.container(border=True):
-        st.subheader("🚀 Assistente Strategia: Prudente vs Aggressiva")
+        st.subheader("🛡️ Strategia Prudente: Analisi Multi-Rischio")
+        st.markdown("Questa analisi calcola i lotti basandosi su uno **Strike consigliato al -5%** dal prezzo attuale.")
         
         # --- INPUT DI BASE ---
         col_base1, col_base2, col_base3 = st.columns(3)
@@ -57,64 +58,56 @@ def assistente_bull_put_dinamico():
         with col_base2:
             capitale_totale = st.number_input("Capitale Totale (€)", value=1000.0, step=100.0)
         with col_base3:
-            target_percentuale = st.slider("Target Rendimento Desiderato (%)", 1.0, 10.0, 5.5) / 100
+            distanza_strike = st.slider("Distanza Strike Consigliata (%)", 1.0, 10.0, 5.0) / 100
 
-        # --- LOGICA DELLE DUE SITUAZIONI ---
+        # --- LOGICA COMUNE ---
+        strike_v = round((prezzo_sottostante * (1 - distanza_strike)) / 5) * 5
+        strike_p = strike_v - 100 # Spread standard di 100 punti
+        
+        st.info(f"💡 **Configurazione Consigliata:** Vendita Put Strike **{strike_v}** | Acquisto Protezione Strike **{strike_p}**")
+
+        col_prezzi1, col_prezzi2 = st.columns(2)
+        with col_prezzi1:
+            p_venduta = st.number_input("Premio Put Venduta ($)", value=25.0, key="p_v")
+        with col_prezzi2:
+            p_prot = st.number_input("Costo Put Protezione ($)", value=5.0, key="p_p")
+        
+        credito_netto_usd = p_venduta - p_prot
+        rischio_unit_usd = (strike_v - strike_p) - credito_netto_usd
+
         st.divider()
-        scen_prudente, scen_aggressivo = st.columns(2)
 
-        # 1. SCENARIO PRUDENTE (Strike -5%)
-        with scen_prudente:
-            st.markdown("### 🛡️ Scenario Prudente")
-            strike_v_p = round((prezzo_sottostante * 0.95) / 5) * 5
-            st.write(f"**Strike consigliato (-5%):** {strike_v_p}")
-            
-            p_venduta_p = st.number_input("Premio Put Venduta ($)", value=20.0, key="pv_p")
-            p_prot_p = st.number_input("Costo Put Prot. ($)", value=5.0, key="pp_p")
-            
-            credito_netto_p = p_venduta_p - p_prot_p
-            # Calcolo lotti per limitare il rischio al 50% capitale
-            rischio_max_consentito = capitale_totale * 0.50
-            larghezza_p = 100 # Default spread largo
-            rischio_unit_usd_p = larghezza_p - credito_netto_p
-            lotti_p = int((rischio_max_consentito * cambio_eurusd) / rischio_unit_usd_p)
-            
-            guadagno_eur_p = (credito_netto_p * lotti_p) / cambio_eurusd
-            st.metric("Lotti Consigliati", lotti_p)
-            st.metric("Rendimento Stimato", f"€ {guadagno_eur_p:.2f}", help="Basato sul rischio del 50%")
+        # --- CONFRONTO DUE SOLUZIONI ---
+        sol_50, sol_75 = st.columns(2)
 
-        # 2. SCENARIO AGGRESSIVO (Target 5-6% del capitale)
-        with scen_aggressivo:
-            st.markdown("### ⚡ Scenario Aggressivo")
-            # Solitamente per incassare di più si usa uno strike al -3% o -4%
-            strike_v_a = round((prezzo_sottostante * 0.97) / 5) * 5
-            st.write(f"**Strike consigliato (-3%):** {strike_v_a}")
+        # 1. SOLUZIONE RISCHIO 50%
+        with sol_50:
+            st.markdown("### 🟢 Rischio Max 50%")
+            limite_50_eur = capitale_totale * 0.50
+            lotti_50 = int((limite_50_eur * cambio_eurusd) / rischio_unit_usd) if rischio_unit_usd > 0 else 0
             
-            p_venduta_a = st.number_input("Premio Put Venduta ($)", value=35.0, key="pv_a")
-            p_prot_a = st.number_input("Costo Put Prot. ($)", value=8.0, key="pp_a")
+            guadagno_50_eur = (credito_netto_usd * lotti_50) / cambio_eurusd
+            rischio_effettivo_50 = (rischio_unit_usd * lotti_50) / cambio_eurusd
             
-            credito_netto_a = p_venduta_a - p_prot_a
-            premio_obiettivo_eur = capitale_totale * target_percentuale
-            premio_obiettivo_usd = premio_obiettivo_eur * cambio_eurusd
-            
-            # Calcolo lotti necessari per raggiungere il target monetario
-            if credito_netto_a > 0:
-                lotti_a = int(np.ceil(premio_obiettivo_usd / credito_netto_a))
-            else:
-                lotti_a = 0
-                
-            st.metric("Lotti Necessari per Target", lotti_a)
-            
-            # Calcolo del rischio che ne deriva
-            larghezza_a = 100
-            rischio_tot_eur_a = ((larghezza_a - credito_netto_a) * lotti_a) / cambio_eurusd
-            
-            st.metric("Guadagno Obiettivo", f"€ {premio_obiettivo_eur:.2f}")
-            st.warning(f"⚠️ Rischio totale: € {rischio_tot_eur_a:.2f}")
-            
-            percent_rischio = (rischio_tot_eur_a / capitale_totale) * 100
-            st.write(f"Stai rischiando il **{percent_rischio:.1f}%** del capitale.")
+            st.metric("Lotti Consigliati", lotti_50)
+            st.metric("Vincita Max (€)", f"€ {guadagno_50_eur:.2f}")
+            st.caption(f"Rischio reale: € {rischio_effettivo_50:.2f}")
 
+        # 2. SOLUZIONE RISCHIO 75%
+        with sol_75:
+            st.markdown("### 🟡 Rischio Max 75%")
+            limite_75_eur = capitale_totale * 0.75
+            lotti_75 = int((limite_75_eur * cambio_eurusd) / rischio_unit_usd) if rischio_unit_usd > 0 else 0
+            
+            guadagno_75_eur = (credito_netto_usd * lotti_75) / cambio_eurusd
+            rischio_effettivo_75 = (rischio_unit_usd * lotti_75) / cambio_eurusd
+            
+            st.metric("Lotti Consigliati", lotti_75)
+            st.metric("Vincita Max (€)", f"€ {guadagno_75_eur:.2f}")
+            st.caption(f"Rischio reale: € {rischio_effettivo_75:.2f}")
+
+        st.divider()
+        st.markdown(f"**Nota Tecnica:** Con lo spread 100 ({strike_v}/{strike_p}), il tuo 'pavimento' di sicurezza è a {strike_p}. Se l'indice scende sotto quel livello, la perdita non aumenta più.")
 
 # --- IMPOSTAZIONI DELLA PAGINA ---
 st.set_page_config(layout="wide")
@@ -123,7 +116,7 @@ st.title(":chart_with_upwards_trend: Trading in opzioni")
 
 inizializza_stato()
 
-assistente_bull_put_dinamico()
+assistente_bull_put_multi_rischio()
 # Usiamo un contenitore con bordo per raggruppare visivamente tutti gli input
 with st.container(border=True):	
 	st.subheader("🎯 Calcolo dello Strike Price")
@@ -226,6 +219,7 @@ with st.container(border=True):
             value=f"{number_contract:.2f}",
             help="Quanti contratti puoi acquistare con il premio calcolato."
         )
+
 
 
 
