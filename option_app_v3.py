@@ -46,11 +46,11 @@ def get_distance_color(diff_percent):
         return "🌟"
 
 def assistente_bull_put_multi_rischio():
-    with st.container(border=True):
+with st.container(border=True):
         st.subheader("🛡️ Strategia Prudente: Analisi Multi-Rischio")
         st.markdown("Questa analisi calcola i lotti basandosi su uno **Strike consigliato al -5%** dal prezzo attuale.")
         
-        # --- INPUT DI BASE ---
+        # --- 1. INPUT DI BASE ---
         col_base1, col_base2, col_base3 = st.columns(3)
         with col_base1:
             prezzo_sottostante = st.number_input("Prezzo Attuale US500", value=6950.0, step=1.0)
@@ -58,58 +58,68 @@ def assistente_bull_put_multi_rischio():
         with col_base2:
             capitale_totale = st.number_input("Capitale Totale (€)", value=1000.0, step=100.0)
         with col_base3:
-            distanza_strike = st.slider("Distanza Strike Consigliata (%)", 1.0, 10.0, 5.0) / 100
+            distanza_strike_pct = st.slider("Distanza Strike Consigliata (%)", 1.0, 10.0, 5.0) / 100
 
-        # --- LOGICA COMUNE ---
-        strike_v = round((prezzo_sottostante * (1 - distanza_strike)) / 5) * 5
-        larghezza_scelta = st.select_slider("Larghezza Spread (Punti)", options=[25, 50, 75, 100, 150, 200], value=100)
-		strike_p = strike_v - larghezza_scelta
+        # --- 2. CONFIGURAZIONE DELLO SPREAD ---
+        st.divider()
+        col_spr1, col_spr2 = st.columns([2, 1])
         
-        st.info(f"💡 **Configurazione Consigliata:** Vendita Put Strike **{strike_v}** | Acquisto Protezione Strike **{strike_p}**")
+        with col_spr1:
+            # Calcolo strike venduto
+            strike_v = round((prezzo_sottostante * (1 - distanza_strike_pct)) / 5) * 5
+            # Slider per la larghezza dello spread (consigliato 100)
+            larghezza_spread = st.select_slider(
+                "Larghezza Spread (Punti di distanza tra le due Put)", 
+                options=[25, 50, 75, 100, 150, 200], 
+                value=100,
+                help="100 punti è lo standard. Più è stretto (es. 50), meno capitale blocchi ma la protezione costa di più."
+            )
+            strike_p = strike_v - larghezza_spread
+            st.info(f"💡 **Configurazione:** Vendi Put **{strike_v}** | Compra Put **{strike_p}**")
 
-        col_prezzi1, col_prezzi2 = st.columns(2)
-        with col_prezzi1:
-            p_venduta = st.number_input("Premio Put Venduta ($)", value=20.0, key="p_v")
-        with col_prezzi2:
-            p_prot = st.number_input("Costo Put Protezione ($)", value=15.0, key="p_p")
-        
+        with col_spr2:
+            p_venduta = st.number_input("Premio Put Venduta ($)", value=25.0)
+            p_prot = st.number_input("Costo Put Prot. ($)", value=5.0)
+
+        # --- 3. CALCOLI TECNICI ---
         credito_netto_usd = p_venduta - p_prot
-        rischio_unit_usd = (strike_v - strike_p) - credito_netto_usd
+        # Il rischio per lotto è la larghezza dello spread meno l'incasso
+        rischio_unit_usd = larghezza_spread - credito_netto_usd
+
+        if rischio_unit_usd <= 0:
+            st.error("Errore: Il costo della protezione supera il premio incassato. Controlla i prezzi.")
+            return
 
         st.divider()
 
-        # --- CONFRONTO DUE SOLUZIONI ---
+        # --- 4. CONFRONTO SOLUZIONI ---
         sol_50, sol_75 = st.columns(2)
 
-        # 1. SOLUZIONE RISCHIO 50%
+        # SOLUZIONE RISCHIO 50%
         with sol_50:
             st.markdown("### 🟢 Rischio Max 50%")
             limite_50_eur = capitale_totale * 0.50
-            lotti_50 = int((limite_50_eur * cambio_eurusd) / rischio_unit_usd) if rischio_unit_usd > 0 else 0
+            lotti_50 = int((limite_50_eur * cambio_eurusd) / rischio_unit_usd)
             
             guadagno_50_eur = (credito_netto_usd * lotti_50) / cambio_eurusd
             rischio_effettivo_50 = (rischio_unit_usd * lotti_50) / cambio_eurusd
             
             st.metric("Lotti Consigliati", lotti_50)
             st.metric("Vincita Max (€)", f"€ {guadagno_50_eur:.2f}")
-            st.caption(f"Rischio reale: € {rischio_effettivo_50:.2f}")
+            st.caption(f"Margine/Rischio: € {rischio_effettivo_50:.2f}")
 
-        # 2. SOLUZIONE RISCHIO 75%
+        # SOLUZIONE RISCHIO 75%
         with sol_75:
             st.markdown("### 🟡 Rischio Max 75%")
             limite_75_eur = capitale_totale * 0.75
-            lotti_75 = int((limite_75_eur * cambio_eurusd) / rischio_unit_usd) if rischio_unit_usd > 0 else 0
+            lotti_75 = int((limite_75_eur * cambio_eurusd) / rischio_unit_usd)
             
             guadagno_75_eur = (credito_netto_usd * lotti_75) / cambio_eurusd
             rischio_effettivo_75 = (rischio_unit_usd * lotti_75) / cambio_eurusd
             
             st.metric("Lotti Consigliati", lotti_75)
             st.metric("Vincita Max (€)", f"€ {guadagno_75_eur:.2f}")
-            st.caption(f"Rischio reale: € {rischio_effettivo_75:.2f}")
-
-        st.divider()
-        st.info(f"**Nota Tecnica:** Con lo spread 100 ({strike_v}/{strike_p}), il tuo 'pavimento' di sicurezza è a {strike_p}. Se l'indice scende sotto quel livello, la perdita non aumenta più.")
-
+            st.caption(f"Margine/Rischio: € {rischio_effettivo_75:.2f}")
 # --- IMPOSTAZIONI DELLA PAGINA ---
 st.set_page_config(layout="wide")
 st.title(":chart_with_upwards_trend: Trading in opzioni")
@@ -220,6 +230,7 @@ with st.container(border=True):
             value=f"{number_contract:.2f}",
             help="Quanti contratti puoi acquistare con il premio calcolato."
         )
+
 
 
 
