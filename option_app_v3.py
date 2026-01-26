@@ -62,7 +62,8 @@ def assistente_bull_put_multi_rischio():
 
         # --- LOGICA COMUNE ---
         strike_v = round((prezzo_sottostante * (1 - distanza_strike)) / 5) * 5
-        strike_p = strike_v - 100 # Spread standard di 100 punti
+        larghezza_scelta = st.select_slider("Larghezza Spread (Punti)", options=[25, 50, 75, 100, 150, 200], value=100)
+		strike_p = strike_v - larghezza_scelta
         
         st.info(f"💡 **Configurazione Consigliata:** Vendita Put Strike **{strike_v}** | Acquisto Protezione Strike **{strike_p}**")
 
@@ -219,6 +220,7 @@ with st.container(border=True):
             value=f"{number_contract:.2f}",
             help="Quanti contratti puoi acquistare con il premio calcolato."
         )
+
 
 
 
