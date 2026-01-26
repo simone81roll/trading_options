@@ -46,7 +46,7 @@ def get_distance_color(diff_percent):
         return "🌟"
 
 def assistente_bull_put_multi_rischio():
-with st.container(border=True):
+    with st.container(border=True):
         st.subheader("🛡️ Strategia Prudente: Analisi Multi-Rischio")
         st.markdown("Questa analisi calcola i lotti basandosi su uno **Strike consigliato al -5%** dal prezzo attuale.")
         
@@ -120,6 +120,8 @@ with st.container(border=True):
             st.metric("Lotti Consigliati", lotti_75)
             st.metric("Vincita Max (€)", f"€ {guadagno_75_eur:.2f}")
             st.caption(f"Margine/Rischio: € {rischio_effettivo_75:.2f}")
+			
+
 # --- IMPOSTAZIONI DELLA PAGINA ---
 st.set_page_config(layout="wide")
 st.title(":chart_with_upwards_trend: Trading in opzioni")
@@ -230,6 +232,7 @@ with st.container(border=True):
             value=f"{number_contract:.2f}",
             help="Quanti contratti puoi acquistare con il premio calcolato."
         )
+
 
 
 
