@@ -36,6 +36,56 @@ def get_risk_indicator(risk_point):
     else:
         return "#008000", "Basso"
 
+def valuta_regole_base(dati_posizione):
+    """
+    Valuta la posizione secondo alcune regole operative di base.
+    Restituisce una lista di alert.
+    """
+
+    alert = []
+
+    distanza_percentuale = dati_posizione.get("distanza_percentuale", 0)
+    punteggio_rischio = dati_posizione.get("punteggio_rischio", 0)
+    rendimento_atteso = dati_posizione.get("rendimento_atteso_percentuale", 0)
+    numero_contratti = dati_posizione.get("numero_massimo_contratti", 0)
+    prezzo_sottostante = dati_posizione.get("prezzo_sottostante", 0)
+    strike_price = dati_posizione.get("strike_price", 0)
+
+    if prezzo_sottostante <= 0:
+        alert.append("Prezzo del sottostante non valido o mancante.")
+
+    if strike_price <= 0:
+        alert.append("Strike price non valido o mancante.")
+
+    if distanza_percentuale < 0:
+        alert.append("Lo strike risulta sopra il prezzo del sottostante: posizione potenzialmente molto rischiosa.")
+
+    elif distanza_percentuale < 3:
+        alert.append("Strike molto vicino al prezzo attuale del sottostante.")
+
+    elif distanza_percentuale < 5:
+        alert.append("Strike abbastanza vicino al prezzo attuale: valutare con prudenza.")
+
+    if punteggio_rischio >= 170:
+        alert.append("Punteggio rischio molto elevato.")
+
+    elif punteggio_rischio >= 130:
+        alert.append("Punteggio rischio medio-alto.")
+
+    if rendimento_atteso > 20:
+        alert.append("Rendimento atteso molto aggressivo rispetto al capitale.")
+
+    elif rendimento_atteso > 12:
+        alert.append("Rendimento atteso abbastanza elevato: verificare che il rischio sia coerente.")
+
+    if numero_contratti < 1:
+        alert.append("Il numero massimo di contratti è inferiore a 1: il capitale/premio potrebbe non essere sufficiente.")
+
+    elif numero_contratti > 10:
+        alert.append("Numero massimo di contratti elevato: verificare esposizione complessiva e rischio massimo.")
+
+    return alert
+
 def get_distance_color(diff_percent):
     """Restituisce un'emoji per la distanza percentuale dallo strike."""
     if diff_percent < 4.50:
@@ -250,12 +300,24 @@ dati_posizione = {
     "numero_massimo_contratti": number_contract,
 }
 
+alert_regole_base = valuta_regole_base(dati_posizione)
+dati_posizione["alert_regole_base"] = alert_regole_base
+st.divider()
+
+with st.container(border=True):
+    st.subheader("🧭 Controllo regole base")
+
+    if alert_regole_base:
+        st.warning("Sono stati rilevati alcuni punti da verificare prima di valutare l'ingresso:")
+
+        for alert in alert_regole_base:
+            st.write(f"- {alert}")
+    else:
+        st.success("La posizione non presenta alert evidenti secondo le regole base impostate.")
+
+
+
+
+
 with st.expander("Dati posizione - debug"):
     st.json(dati_posizione)
-
-
-
-
-
-
-
