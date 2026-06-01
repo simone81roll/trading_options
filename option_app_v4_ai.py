@@ -1,7 +1,7 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-
+from ai_assistant import valuta_strategia_prudente_ai
 
 # -----------------------------------------------------------------------------
 # Stato sessione
