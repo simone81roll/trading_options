@@ -264,7 +264,67 @@ if dati_ai:
 
     with st.expander("Dati letti dall'AI - Strategia Prudente"):
         st.json(dati_ai)
-
+        
+    st.divider()
+    
+    with st.container(border=True):
+        st.subheader("🤖 Valutazione AI - Strategia Prudente")
+    
+        st.caption(
+            "L'AI analizza i dati della strategia prudente e restituisce una checklist di supporto. "
+            "Non fornisce raccomandazioni operative di acquisto o vendita."
+        )
+    
+        if st.button("Analizza con AI", type="primary"):
+            try:
+                with st.spinner("Analisi AI in corso..."):
+                    valutazione_ai = valuta_strategia_prudente_ai(dati_ai)
+    
+                st.session_state["valutazione_ai"] = valutazione_ai
+    
+            except Exception as e:
+                st.error(f"Errore durante l'analisi AI: {e}")
+    
+        if "valutazione_ai" in st.session_state:
+            valutazione_ai = st.session_state["valutazione_ai"]
+    
+            col1, col2 = st.columns(2)
+    
+            with col1:
+                st.metric("Esito", valutazione_ai.get("esito", "N/D"))
+    
+            with col2:
+                st.metric("Livello rischio", valutazione_ai.get("livello_rischio", "N/D"))
+    
+            st.write("### Sintesi")
+            st.info(valutazione_ai.get("sintesi", "Nessuna sintesi disponibile."))
+    
+            st.write("### Punti positivi")
+            punti_positivi = valutazione_ai.get("punti_positivi", [])
+            if punti_positivi:
+                for punto in punti_positivi:
+                    st.write(f"- {punto}")
+            else:
+                st.write("Nessun punto positivo specifico rilevato.")
+    
+            st.write("### Criticità")
+            criticita = valutazione_ai.get("criticita", [])
+            if criticita:
+                for punto in criticita:
+                    st.warning(punto)
+            else:
+                st.success("Nessuna criticità specifica rilevata.")
+    
+            st.write("### Controlli prima di valutare")
+            controlli = valutazione_ai.get("controlli_prima_di_valutare", [])
+            if controlli:
+                for punto in controlli:
+                    st.write(f"- {punto}")
+            else:
+                st.write("Nessun controllo aggiuntivo indicato.")
+    
+            st.write("### Nota finale")
+            st.caption(valutazione_ai.get("nota_finale", ""))
 
 # -----------------------------------------------------------------------------
 # Sezioni originali della V3 mantenute per confronto/manualità
