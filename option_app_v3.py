@@ -233,8 +233,25 @@ with st.container(border=True):
             help="Quanti contratti puoi acquistare con il premio calcolato."
         )
 
+# --- DATI POSIZIONE PER ANALISI SUCCESSIVE / AI ---
 
+dati_posizione = {
+    "prezzo_sottostante": asset_price,
+    "strike_price": target_price,
+    "distanza_assoluta": diff_value,
+    "distanza_percentuale": diff_percent,
+    "capitale_iniziale": capitale,
+    "rendimento_atteso_percentuale": st.session_state.rendimento_atteso,
+    "premio_potenziale": premio,
+    "prezzo_sicurezza": sicure_price,
+    "punteggio_rischio": risk_point,
+    "livello_rischio": label_risk,
+    "prezzo_indicativo_contratto": prezzo_indicativo,
+    "numero_massimo_contratti": number_contract,
+}
 
+with st.expander("Dati posizione - debug"):
+    st.json(dati_posizione)
 
 
 
