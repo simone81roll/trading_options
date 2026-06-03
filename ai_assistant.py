@@ -54,33 +54,42 @@ ampiezza_spread_pct = st.sidebar.slider("Ampiezza dello Spread (%)", min_value=1
 @st.cache_data(ttl=86400)
 def carica_dati_completi(symbol):
     try:
-        # Scarichiamo i dati con group_by per gestire i comportamenti delle nuove versioni di yfinance
-        data = yf.download(symbol, start="2000-01-01", group_by='ticker')
+        # Metodo alternativo e più robusto rispetto a yf.download
+        ticker_obj = yf.Ticker(symbol)
         
+        # Scarichiamo la serie storica massima
+        data = ticker_obj.history(period="max")
+        
+        if data.empty:
+            # Secondo tentativo di riserva se il primo fallisce
+            data = yf.download(symbol, period="max", auto_adjust=True)
+            
         if data.empty:
             return pd.DataFrame()
             
-        # Se yfinance restituisce un MultiIndex nelle colonne, lo appiattiamo prendendo il livello corretto
+        # Appiattiamo le colonne se yfinance ha creato un MultiIndex
         if isinstance(data.columns, pd.MultiIndex):
-            if symbol in data.columns.levels[0]:
-                data = data[symbol]
-            else:
-                data.columns = data.columns.droplevel(0)
+            data.columns = [col[0] if isinstance(col, tuple) else col for col in data.columns]
+            
+        # Nelle chiamate .history(), Yahoo chiama la colonna 'Close' (che è già rettificata)
+        colonna_prezzo = 'Close' if 'Close' in data.columns else 'Adj Close'
         
-        # Cerchiamo la colonna di chiusura corretta (Adj Close o Close)
-        colonna_prezzo = 'Adj Close' if 'Adj Close' in data.columns else 'Close'
-        
-        df_puro = data[[colonna_prezzo]].copy()
+        # Estraiamo e puliamo il DataFrame
+        df_puro = pd.DataFrame(data[colonna_prezzo]).copy()
         df_puro.columns = ['Close']
         
-        # Forziamo la colonna a essere un perimetro monodimensionale pulito (Series di float)
-        df_puro['Close'] = df_puro['Close'].astype(float)
+        # Rimuoviamo l'eventuale fuso orario dall'indice delle date per evitare conflitti
+        df_puro.index = df_puro.index.date
+        df_puro.index = pd.to_datetime(df_puro.index)
+        
+        # Forziamo i prezzi a valori numerici float
+        df_puro['Close'] = pd.to_numeric(df_puro['Close'], errors='coerce')
+        df_puro = df_puro.dropna()
         
         return df_puro
     except Exception as e:
-        st.sidebar.error(f"Errore nel download: {e}")
+        st.sidebar.error(f"Errore tecnico nel modulo download: {e}")
         return pd.DataFrame()
-
 try:
     with st.spinner("Estrazione e analisi dello storico S&P 500 in corso..."):
         df = carica_dati_completi(ticker_symbol)
