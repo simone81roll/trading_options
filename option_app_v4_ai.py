@@ -50,39 +50,47 @@ st.sidebar.subheader("🎯 Definizione degli Strike")
 strike_venduto_pct = st.sidebar.slider("Distanza Strike VENDUTO (%)", min_value=-15.0, max_value=-1.0, value=-5.0, step=0.5) / 100
 ampiezza_spread_pct = st.sidebar.slider("Ampiezza dello Spread (%)", min_value=1.0, max_value=10.0, value=2.0, step=0.5) / 100
 
-# CARICAMENTO DATI CON ERROR HANDLING STRUTTURATO
+# CARICAMENTO DATI - VERSIONE ANTI-BLOCCO (User-Agent personalizzato)
 @st.cache_data(ttl=86400)
 def carica_dati_completi(symbol):
+    import urllib.request
+    import json
+    
     try:
-        # Metodo alternativo e più robusto rispetto a yf.download
+        # Creiamo un oggetto Ticker nativo
         ticker_obj = yf.Ticker(symbol)
         
-        # Scarichiamo la serie storica massima
-        data = ticker_obj.history(period="max")
+        # Configuriamo una sessione interna a yfinance per camuffare il server cloud
+        # Usiamo un User-Agent standard di un browser comune
+        import requests
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        })
         
+        # Scarichiamo i dati passando la sessione camuffata
+        data = ticker_obj.history(period="max", session=session)
+        
+        # Se il metodo history fallisce, proviamo con download classico ma sempre con la sessione protetta
         if data.empty:
-            # Secondo tentativo di riserva se il primo fallisce
-            data = yf.download(symbol, period="max", auto_adjust=True)
+            data = yf.download(symbol, period="max", auto_adjust=True, session=session)
             
         if data.empty:
             return pd.DataFrame()
             
-        # Appiattiamo le colonne se yfinance ha creato un MultiIndex
+        # Appiattiamo le colonne se presente un MultiIndex
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = [col[0] if isinstance(col, tuple) else col for col in data.columns]
             
-        # Nelle chiamate .history(), Yahoo chiama la colonna 'Close' (che è già rettificata)
         colonna_prezzo = 'Close' if 'Close' in data.columns else 'Adj Close'
         
-        # Estraiamo e puliamo il DataFrame
         df_puro = pd.DataFrame(data[colonna_prezzo]).copy()
         df_puro.columns = ['Close']
         
-        # Rimuoviamo l'eventuale fuso orario dall'indice delle date per evitare conflitti
+        # Pulizia dell'indice temporale
         df_puro.index = df_puro.index.date
         df_puro.index = pd.to_datetime(df_puro.index)
         
-        # Forziamo i prezzi a valori numerici float
         df_puro['Close'] = pd.to_numeric(df_puro['Close'], errors='coerce')
         df_puro = df_puro.dropna()
         
