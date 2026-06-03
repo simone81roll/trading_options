@@ -1,434 +1,230 @@
 import streamlit as st
-import numpy as np
+import yfinance as yf
 import pandas as pd
-from ai_assistant import valuta_strategia_prudente_ai
+import numpy as np
+import plotly.graph_objects as go
 
-# -----------------------------------------------------------------------------
-# Stato sessione
-# -----------------------------------------------------------------------------
-def inizializza_stato():
-    """Inizializza lo stato della sessione, se non è già presente."""
-    if "rendimento_atteso" not in st.session_state:
-        st.session_state["rendimento_atteso"] = 10.0
+# Configurazione Pagina
+st.set_page_config(
+    page_title="Options Edge Finder v3",
+    page_icon="🛡️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
+# CSS Personalizzato per l'interfaccia grafica
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .status-card {
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin-bottom: 15px;
+        color: white;
+    }
+    .metric-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border-left: 5px solid #0066cc;
+        margin-bottom: 15px;
+    }
+    .metric-label { font-size: 13px; color: #6c757d; font-weight: 500; text-transform: uppercase; }
+    .metric-value { font-size: 22px; color: #1c1c1c; font-weight: bold; }
+    </style>
+""", unsafe_allow_html=True)
 
-def update_from_slider():
-    """Aggiorna lo stato della sessione quando lo slider cambia."""
-    st.session_state["rendimento_atteso"] = st.session_state.rendimento_slider
+st.title("🛡️ Options Edge Finder — Regime Analysis & Spread Calculator")
+st.markdown("Questo modulo analizza l'efficacia del **Credit Put Spread** separando i dati storici in base alla posizione del prezzo rispetto alla **Media Mobile a 200 periodi (SMA 200)**.")
 
-    if st.session_state["rendimento_atteso"] > 100.0:
-        st.session_state["rendimento_atteso"] = 100.0
+# SIDEBAR PARAMETRI
+st.sidebar.header("⚙️ Parametri di Configurazione")
+ticker_symbol = "SPY"
 
+dte_opzioni = st.sidebar.slider("Giorni alla scadenza (DTE)", min_value=15, max_value=60, value=30, step=5)
+giorni_lavorativi = int(np.round(dte_opzioni * (5/7)))
 
-def update_from_number_input():
-    """Aggiorna lo stato della sessione quando l'input numerico cambia."""
-    st.session_state["rendimento_atteso"] = st.session_state.rendimento_input
+st.sidebar.subheader("🎯 Definizione degli Strike")
+strike_venduto_pct = st.sidebar.slider("Distanza Strike VENDUTO (%)", min_value=-15.0, max_value=-1.0, value=-5.0, step=0.5) / 100
+ampiezza_spread_pct = st.sidebar.slider("Ampiezza dello Spread (%)", min_value=1.0, max_value=10.0, value=2.0, step=0.5) / 100
 
-    if st.session_state["rendimento_atteso"] < 1.0:
-        st.session_state["rendimento_atteso"] = 1.0
-    elif st.session_state["rendimento_atteso"] > 100.0:
-        st.session_state["rendimento_atteso"] = 100.0
-
-
-# -----------------------------------------------------------------------------
-# Funzioni di supporto
-# -----------------------------------------------------------------------------
-def get_risk_indicator(risk_point):
-    """Restituisce un colore e un'etichetta di rischio in base al punteggio."""
-    if risk_point > 270:
-        return "#F90000", "Molto Alto"
-    elif risk_point >= 170:
-        return "#F99300", "Alto"
-    elif risk_point >= 70:
-        return "#00f900", "Medio"
-    else:
-        return "#008000", "Basso"
-
-
-def get_distance_color(diff_percent):
-    """Restituisce un'emoji per la distanza percentuale dallo strike."""
-    if diff_percent < 4.50:
-        return ""
-    elif diff_percent <= 10.0:
-        return ""
-    else:
-        return ""
-
-
-def valuta_regole_strategia_prudente(dati_ai):
-    """
-    Valuta la Strategia Prudente secondo regole tecniche di base.
-
-    Questa funzione non usa AI: serve come filtro deterministico prima di passare
-    eventualmente i dati a un modello AI.
-    """
-    alert = []
-
-    credito_netto = dati_ai.get("credito_netto_usd", 0)
-    rischio_unitario = dati_ai.get("rischio_unitario_usd", 0)
-    larghezza_spread = dati_ai.get("larghezza_spread", 0)
-    prezzo_sottostante = dati_ai.get("prezzo_sottostante", 0)
-    strike_venduto = dati_ai.get("strike_venduto", 0)
-
-    rapporto_credito_rischio = credito_netto / rischio_unitario if rischio_unitario else 0
-    distanza_strike = (
-        ((prezzo_sottostante - strike_venduto) / prezzo_sottostante) * 100
-        if prezzo_sottostante
-        else 0
-    )
-
-    if credito_netto <= 0:
-        alert.append("Credito netto nullo o negativo: la strategia non genera incasso iniziale.")
-
-    if rapporto_credito_rischio < 0.03:
-        alert.append("Credito netto molto basso rispetto al rischio unitario dello spread.")
-
-    if distanza_strike < 5:
-        alert.append("Strike venduto vicino al prezzo attuale rispetto alla logica prudente.")
-
-    if larghezza_spread > 150:
-        alert.append("Spread molto largo: rischio unitario elevato.")
-
-    soluzione_50 = dati_ai.get("soluzione_rischio_50", {})
-    soluzione_75 = dati_ai.get("soluzione_rischio_75", {})
-
-    if soluzione_50.get("lotti_consigliati", 0) == 0:
-        alert.append("Con rischio massimo 50% non risulta apribile alcun lotto.")
-
-    if soluzione_75.get("lotti_consigliati", 0) == 0:
-        alert.append("Con rischio massimo 75% non risulta apribile alcun lotto.")
-
-    return alert
-
-
-# -----------------------------------------------------------------------------
-# Sezione Strategia Prudente - Analisi Multi-Rischio
-# -----------------------------------------------------------------------------
-def assistente_bull_put_multi_rischio():
-    """
-    Mostra la sezione Strategia Prudente e restituisce i dati da passare all'AI.
-    """
-    with st.container(border=True):
-        st.subheader("🛡️ Strategia Prudente: Analisi Multi-Rischio")
-        st.markdown(
-            "Questa analisi calcola i lotti basandosi su uno "
-            "**Strike consigliato al -5%** dal prezzo attuale."
-        )
-
-        # --- 1. INPUT DI BASE ---
-        col_base1, col_base2, col_base3 = st.columns(3)
-
-        with col_base1:
-            prezzo_sottostante = st.number_input("Prezzo Attuale US500", value=6950.0, step=1.0)
-            cambio_eurusd = st.number_input("Cambio EUR/USD", value=1.08, step=0.01)
-
-        with col_base2:
-            capitale_totale = st.number_input("Capitale Totale (€)", value=1000.0, step=100.0)
-
-        with col_base3:
-            distanza_strike_pct = (
-                st.slider("Distanza Strike Consigliata (%)", 1.0, 10.0, 5.0) / 100
-            )
-
-        # --- 2. CONFIGURAZIONE DELLO SPREAD ---
-        st.divider()
-        col_spr1, col_spr2 = st.columns([2, 1])
-
-        with col_spr1:
-            strike_v = round((prezzo_sottostante * (1 - distanza_strike_pct)) / 5) * 5
-            larghezza_spread = st.select_slider(
-                "Larghezza Spread (Punti di distanza tra le due Put)",
-                options=[25, 50, 75, 100, 150, 200],
-                value=100,
-                help=(
-                    "100 punti è lo standard. Più è stretto, meno capitale blocchi "
-                    "ma la protezione costa di più."
-                ),
-            )
-            strike_p = strike_v - larghezza_spread
-            st.info(f"**Configurazione:** Vendi Put **{strike_v}** | Compra Put **{strike_p}**")
-
-        with col_spr2:
-            p_venduta = st.number_input("Premio Put Venduta ($)", value=19.0)
-            p_prot = st.number_input("Costo Put Prot. ($)", value=15.0)
-
-        # --- 3. CALCOLI TECNICI ---
-        credito_netto_usd = p_venduta - p_prot
-        rischio_unit_usd = larghezza_spread - credito_netto_usd
-
-        if rischio_unit_usd <= 0:
-            st.error("Errore: il costo della protezione supera il premio incassato. Controlla i prezzi.")
-            return {
-                "tipo_analisi": "Strategia Prudente - Analisi Multi-Rischio",
-                "errore": "Rischio unitario non valido",
-                "prezzo_sottostante": prezzo_sottostante,
-                "cambio_eurusd": cambio_eurusd,
-                "capitale_totale_eur": capitale_totale,
-                "distanza_strike_percentuale": distanza_strike_pct * 100,
-                "strike_venduto": strike_v,
-                "strike_comprato_protezione": strike_p,
-                "larghezza_spread": larghezza_spread,
-                "premio_put_venduta_usd": p_venduta,
-                "costo_put_protezione_usd": p_prot,
-                "credito_netto_usd": credito_netto_usd,
-                "rischio_unitario_usd": rischio_unit_usd,
-            }
-
-        st.divider()
-
-        # --- 4. CONFRONTO SOLUZIONI ---
-        sol_50, sol_75 = st.columns(2)
-
-        with sol_50:
-            st.markdown("### Rischio Max 50%")
-            limite_50_eur = capitale_totale * 0.50
-            lotti_50 = int((limite_50_eur * cambio_eurusd) / rischio_unit_usd)
-            guadagno_50_eur = (credito_netto_usd * lotti_50) / cambio_eurusd
-            rischio_effettivo_50 = (rischio_unit_usd * lotti_50) / cambio_eurusd
-
-            st.metric("Lotti Consigliati", lotti_50)
-            st.metric("Vincita Max (€)", f"€ {guadagno_50_eur:.2f}")
-            st.caption(f"Margine/Rischio: € {rischio_effettivo_50:.2f}")
-
-        with sol_75:
-            st.markdown("### Rischio Max 75%")
-            limite_75_eur = capitale_totale * 0.75
-            lotti_75 = int((limite_75_eur * cambio_eurusd) / rischio_unit_usd)
-            guadagno_75_eur = (credito_netto_usd * lotti_75) / cambio_eurusd
-            rischio_effettivo_75 = (rischio_unit_usd * lotti_75) / cambio_eurusd
-
-            st.metric("Lotti Consigliati", lotti_75)
-            st.metric("Vincita Max (€)", f"€ {guadagno_75_eur:.2f}")
-            st.caption(f"Margine/Rischio: € {rischio_effettivo_75:.2f}")
-
-        dati_strategia_prudente = {
-            "tipo_analisi": "Strategia Prudente - Analisi Multi-Rischio",
-            "prezzo_sottostante": prezzo_sottostante,
-            "cambio_eurusd": cambio_eurusd,
-            "capitale_totale_eur": capitale_totale,
-            "distanza_strike_percentuale": distanza_strike_pct * 100,
-            "strike_venduto": strike_v,
-            "strike_comprato_protezione": strike_p,
-            "larghezza_spread": larghezza_spread,
-            "premio_put_venduta_usd": p_venduta,
-            "costo_put_protezione_usd": p_prot,
-            "credito_netto_usd": credito_netto_usd,
-            "rischio_unitario_usd": rischio_unit_usd,
-            "rapporto_credito_rischio": (
-                credito_netto_usd / rischio_unit_usd if rischio_unit_usd else 0
-            ),
-            "soluzione_rischio_50": {
-                "limite_rischio_eur": limite_50_eur,
-                "lotti_consigliati": lotti_50,
-                "guadagno_massimo_eur": guadagno_50_eur,
-                "rischio_effettivo_eur": rischio_effettivo_50,
-            },
-            "soluzione_rischio_75": {
-                "limite_rischio_eur": limite_75_eur,
-                "lotti_consigliati": lotti_75,
-                "guadagno_massimo_eur": guadagno_75_eur,
-                "rischio_effettivo_eur": rischio_effettivo_75,
-            },
-        }
-
-        return dati_strategia_prudente
-
-
-# -----------------------------------------------------------------------------
-# App principale
-# -----------------------------------------------------------------------------
-st.set_page_config(layout="wide")
-st.title(":robot_face: Trading in opzioni - AI Lab")
-
-inizializza_stato()
-
-# Questa è la sezione che dovrà alimentare l'AI.
-dati_ai = assistente_bull_put_multi_rischio()
-
-if dati_ai:
-    alert_ai = valuta_regole_strategia_prudente(dati_ai)
-
-    st.divider()
-
-    with st.container(border=True):
-        st.subheader("🧭 Controllo regole base - Strategia Prudente")
-
-        if dati_ai.get("errore"):
-            st.error(dati_ai["errore"])
-        elif alert_ai:
-            st.warning("Sono stati rilevati alcuni punti da verificare prima di valutare l'ingresso:")
-            for alert in alert_ai:
-                st.write(f"- {alert}")
-        else:
-            st.success("La strategia non presenta alert evidenti secondo le regole base impostate.")
-
-    with st.expander("Dati letti dall'AI - Strategia Prudente"):
-        st.json(dati_ai)
-        
-    st.divider()
-    
-    with st.container(border=True):
-        st.subheader("🤖 Valutazione AI - Strategia Prudente")
-    
-        st.caption(
-            "L'AI analizza i dati della strategia prudente e restituisce una checklist di supporto. "
-            "Non fornisce raccomandazioni operative di acquisto o vendita."
-        )
-    
-        if st.button("Analizza con AI", type="primary"):
-            try:
-                with st.spinner("Analisi AI in corso..."):
-                    valutazione_ai = valuta_strategia_prudente_ai(dati_ai)
-    
-                st.session_state["valutazione_ai"] = valutazione_ai
-    
-            except Exception as e:
-                st.error(f"Errore durante l'analisi AI: {e}")
-    
-        if "valutazione_ai" in st.session_state:
-            valutazione_ai = st.session_state["valutazione_ai"]
-    
-            col1, col2 = st.columns(2)
-    
-            with col1:
-                st.metric("Esito", valutazione_ai.get("esito", "N/D"))
-    
-            with col2:
-                st.metric("Livello rischio", valutazione_ai.get("livello_rischio", "N/D"))
-    
-            st.write("### Sintesi")
-            st.info(valutazione_ai.get("sintesi", "Nessuna sintesi disponibile."))
-    
-            st.write("### Punti positivi")
-            punti_positivi = valutazione_ai.get("punti_positivi", [])
-            if punti_positivi:
-                for punto in punti_positivi:
-                    st.write(f"- {punto}")
-            else:
-                st.write("Nessun punto positivo specifico rilevato.")
-    
-            st.write("### Criticità")
-            criticita = valutazione_ai.get("criticita", [])
-            if criticita:
-                for punto in criticita:
-                    st.warning(punto)
-            else:
-                st.success("Nessuna criticità specifica rilevata.")
-    
-            st.write("### Controlli prima di valutare")
-            controlli = valutazione_ai.get("controlli_prima_di_valutare", [])
-            if controlli:
-                for punto in controlli:
-                    st.write(f"- {punto}")
-            else:
-                st.write("Nessun controllo aggiuntivo indicato.")
-    
-            st.write("### Nota finale")
-            st.caption(valutazione_ai.get("nota_finale", ""))
-
-# -----------------------------------------------------------------------------
-# Sezioni originali della V3 mantenute per confronto/manualità
-# -----------------------------------------------------------------------------
-with st.container(border=True):
-    st.subheader("Calcolo dello Strike Price")
-
-    sott, strike, var = st.columns([0.35, 0.35, 0.30])
-
-    asset_price = sott.number_input("Prezzo Sottostante", min_value=0.0, value=6000.0, step=1.0, key="price")
-    target_price = strike.number_input("Strike Price", min_value=0.0, value=6000.0, step=1.0, key="strike")
-
-    diff_value = asset_price - target_price
-
+# CARICAMENTO DATI CON ERROR HANDLING STRUTTURATO
+@st.cache_data(ttl=86400)
+def carica_dati_completi(symbol):
     try:
-        diff_percent = (diff_value / asset_price) * 100
-    except ZeroDivisionError:
-        diff_percent = 0.0
+        # Metodo alternativo e più robusto rispetto a yf.download
+        ticker_obj = yf.Ticker(symbol)
+        
+        # Scarichiamo la serie storica massima
+        data = ticker_obj.history(period="max")
+        
+        if data.empty:
+            # Secondo tentativo di riserva se il primo fallisce
+            data = yf.download(symbol, period="max", auto_adjust=True)
+            
+        if data.empty:
+            return pd.DataFrame()
+            
+        # Appiattiamo le colonne se yfinance ha creato un MultiIndex
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = [col[0] if isinstance(col, tuple) else col for col in data.columns]
+            
+        # Nelle chiamate .history(), Yahoo chiama la colonna 'Close' (che è già rettificata)
+        colonna_prezzo = 'Close' if 'Close' in data.columns else 'Adj Close'
+        
+        # Estraiamo e puliamo il DataFrame
+        df_puro = pd.DataFrame(data[colonna_prezzo]).copy()
+        df_puro.columns = ['Close']
+        
+        # Rimuoviamo l'eventuale fuso orario dall'indice delle date per evitare conflitti
+        df_puro.index = df_puro.index.date
+        df_puro.index = pd.to_datetime(df_puro.index)
+        
+        # Forziamo i prezzi a valori numerici float
+        df_puro['Close'] = pd.to_numeric(df_puro['Close'], errors='coerce')
+        df_puro = df_puro.dropna()
+        
+        return df_puro
+    except Exception as e:
+        st.sidebar.error(f"Errore tecnico nel modulo download: {e}")
+        return pd.DataFrame()
+try:
+    with st.spinner("Estrazione e analisi dello storico S&P 500 in corso..."):
+        df = carica_dati_completi(ticker_symbol)
+        
+    if df is None or df.empty:
+        st.error("⚠️ Non è stato possibile scaricare o formattare i dati da Yahoo Finance. Verifica la connessione internet o riprova.")
+    else:
+        # Calcolo indicatori strutturali sulla serie storica pulita
+        df['SMA_200'] = df['Close'].rolling(window=200).mean()
+        df['Prezzo_Futuro'] = df['Close'].shift(-giorni_lavorativi)
+        df['Rendimento_Periodo'] = (df['Prezzo_Futuro'] - df['Close']) / df['Close']
+        
+        # Determina il regime di mercato ALL'INGRESSO della posizione
+        df['Regime'] = np.where(df['Close'] >= df['SMA_200'], 'Toro (Sopra SMA 200)', 'Orso (Sotto SMA 200)')
+        
+        df_analisi = df.dropna().copy()
+        
+        if df_analisi.empty:
+            st.warning("⚠️ Dati insufficienti dopo il calcolo degli indicatori. Lo storico potrebbe essere troppo breve.")
+        else:
+            # Estrazione sicura del valore scalare dell'ultimo prezzo e della SMA 200
+            ultimo_valore_close = df['Close'].iloc[-1]
+            ultimo_valore_sma = df['SMA_200'].iloc[-1]
+            
+            prezzo_corrente = float(ultimo_valore_close.item() if hasattr(ultimo_valore_close, 'item') else ultimo_valore_close)
+            sma_200_attuale = float(ultimo_valore_sma.item() if hasattr(ultimo_valore_sma, 'item') else ultimo_valore_sma)
+            regime_attuale = str(df_analisi['Regime'].iloc[-1])
+            
+            # Calcolo Strike Operativi Reali basati sui prezzi correnti
+            valore_strike_venduto = np.round(prezzo_corrente * (1 + strike_venduto_pct), 2)
+            valore_strike_comprato = np.round(valore_strike_venduto * (1 - ampiezza_spread_pct), 2)
+            distanza_totale_comprato_pct = ((valore_strike_comprato - prezzo_corrente) / prezzo_corrente) * 100
 
-    emoji_distanza = get_distance_color(diff_percent)
+            # INTERFACCIA: STATO ATTUALE DEL MERCATO
+            st.subheader("🚨 Stato del Mercato in Tempo Reale")
+            col_st1, col_st2, col_st3 = st.columns(3)
+            
+            with col_st1:
+                st.metric("Prezzo Corrente SPY", f"${prezzo_corrente:.2f}")
+            with col_st2:
+                st.metric("Media Mobile 200gg (SMA 200)", f"${sma_200_attuale:.2f}")
+            with col_st3:
+                if 'Toro' in regime_attuale:
+                    st.markdown('<div class="status-card" style="background-color: #28a745; text-align:center;"><b>REGIME ATTUALE: TORO</b><br>Prezzo sopra la SMA 200</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<div class="status-card" style="background-color: #dc3545; text-align:center;"><b>REGIME ATTUALE: ORSO</b><br>Prezzo sotto la SMA 200 (Massima Attenzione!)</div>', unsafe_allow_html=True)
 
-    var.metric(
-        label=f"Variazione dallo Strike {emoji_distanza}",
-        value=f"{diff_percent:.2f} %",
-        delta=f"Distanza Assoluta: {diff_value:.2f}",
-    )
+            # INTERFACCIA: SEGNALE OPERATIVO DELLO SPREAD
+            st.subheader("📋 Configurazione del Credit Put Spread")
+            st.markdown("In base ai tuoi parametri di rischio, ecco i livelli esatti da impostare sulla piattaforma di trading:")
+            
+            col_c1, col_c2, col_c3 = st.columns(3)
+            with col_c1:
+                st.error(f"🔴 VENDI (Short Put)\n**Strike: ${valore_strike_venduto:.2f}**\nDistanza attuale: {strike_venduto_pct*100:.1f}%")
+            with col_c2:
+                st.success(f"🟢 COMPRA (Long Put - Protezione)\n**Strike: ${valore_strike_comprato:.2f}**\nDistanza attuale: {distanza_totale_comprato_pct:.1f}%")
+            with col_c3:
+                ampiezza_punti = np.round(valore_strike_venduto - valore_strike_comprato, 2)
+                st.warning(f"🛡️ STRUTTURA SPREAD\n**Ampiezza: {ampiezza_punti} punti**\nRischio Massimo: ${ampiezza_punti*100:.2f} per contratto")
 
+            # FUNZIONE DI CALCOLO DELLE STATISTICHE
+            def calcola_statistiche(dataframe, short_pct, long_pct):
+                totale = len(dataframe)
+                if totale == 0: return 0.0, 0.0, 0
+                
+                # Violazione della barriera venduta (Perdita parziale o totale)
+                violazioni_short = len(dataframe[dataframe['Rendimento_Periodo'] < short_pct])
+                
+                # Violazione dello strike comprato (Massima perdita teorica dello spread)
+                pct_equivalente_comprato = (1 + short_pct) * (1 - long_pct) - 1
+                violazioni_massime = len(dataframe[dataframe['Rendimento_Periodo'] < pct_equivalente_comprato])
+                
+                prob_successo = ((totale - violazioni_short) / totale) * 100
+                prob_perdita_massima = (violazioni_massime / totale) * 100
+                return prob_successo, prob_perdita_massima, totale
 
-with st.container(border=True):
-    st.subheader("Analisi")
+            # Esecuzione dei calcoli statistici per i tre regimi
+            prob_tot_succ, prob_tot_loss, n_tot = calcola_statistiche(df_analisi, strike_venduto_pct, ampiezza_spread_pct)
+            
+            df_toro = df_analisi[df_analisi['Regime'] == 'Toro (Sopra SMA 200)']
+            prob_toro_succ, prob_toro_loss, n_toro = calcola_statistiche(df_toro, strike_venduto_pct, ampiezza_spread_pct)
+            
+            df_orso = df_analisi[df_analisi['Regime'] == 'Orso (Sotto SMA 200)']
+            prob_orso_succ, prob_orso_loss, n_orso = calcola_statistiche(df_orso, strike_venduto_pct, ampiezza_spread_pct)
 
-    col3, col4, col5, col6 = st.columns([0.20, 0.35, 0.15, 0.30])
+            # CONFRONTO STATISTICO TRA REGIMI
+            st.subheader("📊 Impatto della SMA 200 sulle Probabilità Storiche")
+            st.markdown("Confronta come cambiano le probabilità di successo e il rischio di incorrere nella perdita massima in base al trend primario.")
 
-    with col3:
-        capitale = st.number_input("Capitale Iniziale (€)", min_value=100, value=1000, step=100)
+            col_m1, col_m2, col_m3 = st.columns(3)
+            with col_m1:
+                st.markdown(f"""
+                    <div class="metric-card" style="border-left-color: #6c757d;">
+                        <div class="metric-label">Storico Totale (Tutti i giorni)</div>
+                        <div class="metric-value">Prob. Successo: {prob_tot_succ:.1f}%</div>
+                        <div style="font-size:12px; color:#dc3545;">Prob. Perdita Massima: {prob_tot_loss:.1f}%</div>
+                        <div style="font-size:11px; color:#6c757d; margin-top:5px;">Su {n_tot} scenari mensili totali</div>
+                    </div>
+                """, unsafe_allow_html=True)
+            with col_m2:
+                st.markdown(f"""
+                    <div class="metric-card" style="border-left-color: #28a745;">
+                        <div class="metric-label">Quando il mercato è SOPRA la SMA 200</div>
+                        <div class="metric-value" style="color: #28a745;">Prob. Successo: {prob_toro_succ:.1f}%</div>
+                        <div style="font-size:12px; color:#dc3545;">Prob. Perdita Massima: {prob_toro_loss:.1f}%</div>
+                        <div style="font-size:11px; color:#6c757d; margin-top:5px;">Su {n_toro} scenari (Trend Sano)</div>
+                    </div>
+                """, unsafe_allow_html=True)
+            with col_m3:
+                border_color = "#dc3545" if prob_orso_succ < 85 else "#ffc107"
+                st.markdown(f"""
+                    <div class="metric-card" style="border-left-color: {border_color};">
+                        <div class="metric-label">Quando il mercato è SOTTO la SMA 200</div>
+                        <div class="metric-value" style="color: #dc3545;">Prob. Successo: {prob_orso_succ:.1f}%</div>
+                        <div style="font-size:12px; color:#dc3545;">Prob. Perdita Massima: {prob_orso_loss:.1f}%</div>
+                        <div style="font-size:11px; color:#6c757d; margin-top:5px;">Su {n_orso} scenari (Trend Pericoloso)</div>
+                    </div>
+                """, unsafe_allow_html=True)
 
-    with col4:
-        st.slider(
-            "Rendimento Atteso (%)",
-            min_value=1.0,
-            max_value=100.0,
-            value=st.session_state.rendimento_atteso,
-            step=0.1,
-            format="%.2f%%",
-            key="rendimento_slider",
-            on_change=update_from_slider,
-        )
+            # GRAFICO VISIVO DEI REGIMI (BOX PLOT)
+            st.subheader("📈 Distribuzione Geometrica dei Rendimenti a Scadenza per Regime")
+            
+            fig = go.Figure()
+            fig.add_trace(go.Box(y=df_toro['Rendimento_Periodo'] * 100, name="Sopra SMA 200 (Toro)", marker_color='#28a745'))
+            fig.add_trace(go.Box(y=df_orso['Rendimento_Periodo'] * 100, name="Sotto SMA 200 (Orso)", marker_color='#dc3545'))
+            
+            fig.add_hline(y=strike_venduto_pct * 100, line_color="red", line_dash="dash", line_width=2, annotation_text="Livello Strike Venduto")
+            
+            fig.update_layout(
+                yaxis_title="Rendimento a termine del periodo (%)",
+                template="plotly_white",
+                height=400,
+                margin=dict(l=20, r=20, t=20, b=20)
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
-    with col5:
-        st.number_input(
-            "(%)",
-            min_value=1.0,
-            max_value=100.0,
-            value=st.session_state.rendimento_atteso,
-            step=0.1,
-            key="rendimento_input",
-            on_change=update_from_number_input,
-            format="%.2f",
-            label_visibility="hidden",
-        )
-
-    progress_value = st.session_state.rendimento_atteso / 100.0
-    premio = progress_value * capitale
-
-    col6.metric(
-        label="Premio Potenziale",
-        value=f"€ {premio:.2f}",
-    )
-
-    risk, sic, color = st.columns([0.35, 0.35, 0.30])
-
-    sicure_price = sic.number_input("Prezzo di Sicurezza", min_value=0.0, value=220.0, step=0.05)
-    risk_point = risk.number_input("Punteggio di Rischio", min_value=1, max_value=400, value=60, step=1)
-
-    prezzo_indicativo = (sicure_price * progress_value * 50 / risk_point) if risk_point != 0 else 0
-    number_contract = (premio / prezzo_indicativo) if prezzo_indicativo != 0 else 0
-
-    color_risk, label_risk = get_risk_indicator(risk_point)
-
-    color.markdown(
-        f"""
-        <div style="background-color:{color_risk}; padding:10px; border-radius:8px; text-align:center; color:white; font-weight:bold;">
-            Rischio: {label_risk} (Punteggio: {risk_point})
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-with st.container(border=True):
-    st.subheader("Ingresso a mercato")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.metric(
-            label="Prezzo Indicativo per Contratto",
-            value=f"€ {prezzo_indicativo:.2f}",
-            help="Il prezzo stimato a cui aprire la posizione per raggiungere il rendimento atteso.",
-        )
-
-    with col2:
-        st.metric(
-            label="Numero Massimo Contratti",
-            value=f"{number_contract:.2f}",
-            help="Quanti contratti puoi acquistare con il premio calcolato.",
-        )
+except Exception as e:
+    st.error(f"Errore critico durante l'esecuzione dell'applicazione: {e}")
