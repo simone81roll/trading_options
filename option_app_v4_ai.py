@@ -3,10 +3,11 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import requests
 
 # Configurazione Pagina
 st.set_page_config(
-    page_title="Options Edge Finder v3",
+    page_title="Options Edge Finder v4",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -36,8 +37,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🛡️ Options Edge Finder — Regime Analysis & Spread Calculator")
-st.markdown("Questo modulo analizza l'efficacia del **Credit Put Spread** separando i dati storici in base alla posizione del prezzo rispetto alla **Media Mobile a 200 periodi (SMA 200)**.")
+st.title("🛡️ Options Edge Finder — Anti-Rate Limit Version")
+st.markdown("Analisi del **Credit Put Spread** sull'S&P 500 condizionata al regime della **Media Mobile a 200 periodi (SMA 200)**.")
 
 # SIDEBAR PARAMETRI
 st.sidebar.header("⚙️ Parametri di Configurazione")
@@ -50,35 +51,31 @@ st.sidebar.subheader("🎯 Definizione degli Strike")
 strike_venduto_pct = st.sidebar.slider("Distanza Strike VENDUTO (%)", min_value=-15.0, max_value=-1.0, value=-5.0, step=0.5) / 100
 ampiezza_spread_pct = st.sidebar.slider("Ampiezza dello Spread (%)", min_value=1.0, max_value=10.0, value=2.0, step=0.5) / 100
 
-# CARICAMENTO DATI - VERSIONE ANTI-BLOCCO (User-Agent personalizzato)
+# CARICAMENTO DATI CON AGENT PROXY ANTI-BLOCCO VIA REQUESTS SESSION
 @st.cache_data(ttl=86400)
 def carica_dati_completi(symbol):
-    import urllib.request
-    import json
-    
     try:
-        # Creiamo un oggetto Ticker nativo
         ticker_obj = yf.Ticker(symbol)
         
-        # Configuriamo una sessione interna a yfinance per camuffare il server cloud
-        # Usiamo un User-Agent standard di un browser comune
-        import requests
+        # Creiamo una sessione personalizzata con uno User-Agent reale per evitare il blocco 'Too Many Requests'
         session = requests.Session()
         session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5'
         })
         
-        # Scarichiamo i dati passando la sessione camuffata
+        # Chiamata tramite metodo history passandogli la sessione configurata
         data = ticker_obj.history(period="max", session=session)
         
-        # Se il metodo history fallisce, proviamo con download classico ma sempre con la sessione protetta
+        # Fallback se la history fallisce
         if data.empty:
             data = yf.download(symbol, period="max", auto_adjust=True, session=session)
             
         if data.empty:
             return pd.DataFrame()
             
-        # Appiattiamo le colonne se presente un MultiIndex
+        # Appiattiamo l'intestazione se yfinance genera MultiIndex
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = [col[0] if isinstance(col, tuple) else col for col in data.columns]
             
@@ -87,38 +84,39 @@ def carica_dati_completi(symbol):
         df_puro = pd.DataFrame(data[colonna_prezzo]).copy()
         df_puro.columns = ['Close']
         
-        # Pulizia dell'indice temporale
+        # Raddrizziamo l'indice temporale ripulendo i fusi orari di Yahoo
         df_puro.index = df_puro.index.date
         df_puro.index = pd.to_datetime(df_puro.index)
         
+        # Cast numerico pulito
         df_puro['Close'] = pd.to_numeric(df_puro['Close'], errors='coerce')
         df_puro = df_puro.dropna()
         
         return df_puro
     except Exception as e:
-        st.sidebar.error(f"Errore tecnico nel modulo download: {e}")
+        st.sidebar.error(f"Errore nel modulo download: {e}")
         return pd.DataFrame()
+
 try:
-    with st.spinner("Estrazione e analisi dello storico S&P 500 in corso..."):
+    with st.spinner("Estrazione e analisi dello storico S&P 500..."):
         df = carica_dati_completi(ticker_symbol)
         
     if df is None or df.empty:
-        st.error("⚠️ Non è stato possibile scaricare o formattare i dati da Yahoo Finance. Verifica la connessione internet o riprova.")
+        st.error("⚠️ Errore: Ricevuto 'Rate Limit' o nessuna risposta da Yahoo Finance.")
+        st.info("💡 I server condivisi di Streamlit Cloud sono spesso bloccati temporaneamente da Yahoo. Se l'errore persiste, clicca sui tre puntini in alto a destra su Streamlit Cloud e seleziona 'Reboot App' per cambiare server e indirizzo IP.")
     else:
-        # Calcolo indicatori strutturali sulla serie storica pulita
+        # Calcolo indicatori strutturali
         df['SMA_200'] = df['Close'].rolling(window=200).mean()
         df['Prezzo_Futuro'] = df['Close'].shift(-giorni_lavorativi)
         df['Rendimento_Periodo'] = (df['Prezzo_Futuro'] - df['Close']) / df['Close']
         
-        # Determina il regime di mercato ALL'INGRESSO della posizione
         df['Regime'] = np.where(df['Close'] >= df['SMA_200'], 'Toro (Sopra SMA 200)', 'Orso (Sotto SMA 200)')
-        
         df_analisi = df.dropna().copy()
         
         if df_analisi.empty:
-            st.warning("⚠️ Dati insufficienti dopo il calcolo degli indicatori. Lo storico potrebbe essere troppo breve.")
+            st.warning("⚠️ Dati insufficienti dopo la pulizia dei vettori.")
         else:
-            # Estrazione sicura del valore scalare dell'ultimo prezzo e della SMA 200
+            # Estrazione scalari
             ultimo_valore_close = df['Close'].iloc[-1]
             ultimo_valore_sma = df['SMA_200'].iloc[-1]
             
@@ -126,12 +124,12 @@ try:
             sma_200_attuale = float(ultimo_valore_sma.item() if hasattr(ultimo_valore_sma, 'item') else ultimo_valore_sma)
             regime_attuale = str(df_analisi['Regime'].iloc[-1])
             
-            # Calcolo Strike Operativi Reali basati sui prezzi correnti
+            # Calcolo degli Strike Operativi
             valore_strike_venduto = np.round(prezzo_corrente * (1 + strike_venduto_pct), 2)
             valore_strike_comprato = np.round(valore_strike_venduto * (1 - ampiezza_spread_pct), 2)
             distanza_totale_comprato_pct = ((valore_strike_comprato - prezzo_corrente) / prezzo_corrente) * 100
 
-            # INTERFACCIA: STATO ATTUALE DEL MERCATO
+            # INTERFACCIA STATO CORRENTE
             st.subheader("🚨 Stato del Mercato in Tempo Reale")
             col_st1, col_st2, col_st3 = st.columns(3)
             
@@ -145,10 +143,8 @@ try:
                 else:
                     st.markdown('<div class="status-card" style="background-color: #dc3545; text-align:center;"><b>REGIME ATTUALE: ORSO</b><br>Prezzo sotto la SMA 200 (Massima Attenzione!)</div>', unsafe_allow_html=True)
 
-            # INTERFACCIA: SEGNALE OPERATIVO DELLO SPREAD
+            # INTERFACCIA SEGNALE OPERATIVO SPREAD
             st.subheader("📋 Configurazione del Credit Put Spread")
-            st.markdown("In base ai tuoi parametri di rischio, ecco i livelli esatti da impostare sulla piattaforma di trading:")
-            
             col_c1, col_c2, col_c3 = st.columns(3)
             with col_c1:
                 st.error(f"🔴 VENDI (Short Put)\n**Strike: ${valore_strike_venduto:.2f}**\nDistanza attuale: {strike_venduto_pct*100:.1f}%")
@@ -158,15 +154,30 @@ try:
                 ampiezza_punti = np.round(valore_strike_venduto - valore_strike_comprato, 2)
                 st.warning(f"🛡️ STRUTTURA SPREAD\n**Ampiezza: {ampiezza_punti} punti**\nRischio Massimo: ${ampiezza_punti*100:.2f} per contratto")
 
-            # FUNZIONE DI CALCOLO DELLE STATISTICHE
+            # INTERPRETAZIONE INTEGRATA ASSISTENTE AI
+            try:
+                from ai_assistant import valuta_strategia_prudente_ai
+                st.subheader("🤖 Suggerimento Operativo dell'AI Assistant")
+                
+                # Calcolo statistico preliminare per passare i dati reali all'assistente AI
+                def calcola_prob_singola(dataframe, short_pct):
+                    tot = len(dataframe)
+                    if tot == 0: return 0.0
+                    violazioni = len(dataframe[dataframe['Rendimento_Periodo'] < short_pct])
+                    return ((tot - violazioni) / tot) * 100
+                
+                prob_regime_attuale = calcola_prob_singola(df_analisi[df_analisi['Regime'] == regime_attuale], strike_venduto_pct)
+                
+                ai_report = valuta_strategia_prudente_ai(regime_attuale, prob_regime_attuale, 0, valore_strike_venduto, valore_strike_comprato)
+                st.info(f"**{ai_report.get('stato', '')}**\n\n{ai_report.get('nota', '')}")
+            except Exception as ai_err:
+                pass # Se ai_assistant non è presente o ha firme diverse, salta la sezione in modo pulito
+
+            # FUNZIONE STATISTICHE COMPLETE
             def calcola_statistiche(dataframe, short_pct, long_pct):
                 totale = len(dataframe)
                 if totale == 0: return 0.0, 0.0, 0
-                
-                # Violazione della barriera venduta (Perdita parziale o totale)
                 violazioni_short = len(dataframe[dataframe['Rendimento_Periodo'] < short_pct])
-                
-                # Violazione dello strike comprato (Massima perdita teorica dello spread)
                 pct_equivalente_comprato = (1 + short_pct) * (1 - long_pct) - 1
                 violazioni_massime = len(dataframe[dataframe['Rendimento_Periodo'] < pct_equivalente_comprato])
                 
@@ -174,19 +185,14 @@ try:
                 prob_perdita_massima = (violazioni_massime / totale) * 100
                 return prob_successo, prob_perdita_massima, totale
 
-            # Esecuzione dei calcoli statistici per i tre regimi
             prob_tot_succ, prob_tot_loss, n_tot = calcola_statistiche(df_analisi, strike_venduto_pct, ampiezza_spread_pct)
-            
             df_toro = df_analisi[df_analisi['Regime'] == 'Toro (Sopra SMA 200)']
             prob_toro_succ, prob_toro_loss, n_toro = calcola_statistiche(df_toro, strike_venduto_pct, ampiezza_spread_pct)
-            
             df_orso = df_analisi[df_analisi['Regime'] == 'Orso (Sotto SMA 200)']
             prob_orso_succ, prob_orso_loss, n_orso = calcola_statistiche(df_orso, strike_venduto_pct, ampiezza_spread_pct)
 
-            # CONFRONTO STATISTICO TRA REGIMI
+            # OUTPUT METRICHE SULLO SCHERMO
             st.subheader("📊 Impatto della SMA 200 sulle Probabilità Storiche")
-            st.markdown("Confronta come cambiano le probabilità di successo e il rischio di incorrere nella perdita massima in base al trend primario.")
-
             col_m1, col_m2, col_m3 = st.columns(3)
             with col_m1:
                 st.markdown(f"""
@@ -207,9 +213,8 @@ try:
                     </div>
                 """, unsafe_allow_html=True)
             with col_m3:
-                border_color = "#dc3545" if prob_orso_succ < 85 else "#ffc107"
                 st.markdown(f"""
-                    <div class="metric-card" style="border-left-color: {border_color};">
+                    <div class="metric-card" style="border-left-color: #dc3545;">
                         <div class="metric-label">Quando il mercato è SOTTO la SMA 200</div>
                         <div class="metric-value" style="color: #dc3545;">Prob. Successo: {prob_orso_succ:.1f}%</div>
                         <div style="font-size:12px; color:#dc3545;">Prob. Perdita Massima: {prob_orso_loss:.1f}%</div>
@@ -217,22 +222,14 @@ try:
                     </div>
                 """, unsafe_allow_html=True)
 
-            # GRAFICO VISIVO DEI REGIMI (BOX PLOT)
+            # GRAFICO VISIVO (BOX PLOT)
             st.subheader("📈 Distribuzione Geometrica dei Rendimenti a Scadenza per Regime")
-            
             fig = go.Figure()
             fig.add_trace(go.Box(y=df_toro['Rendimento_Periodo'] * 100, name="Sopra SMA 200 (Toro)", marker_color='#28a745'))
             fig.add_trace(go.Box(y=df_orso['Rendimento_Periodo'] * 100, name="Sotto SMA 200 (Orso)", marker_color='#dc3545'))
-            
             fig.add_hline(y=strike_venduto_pct * 100, line_color="red", line_dash="dash", line_width=2, annotation_text="Livello Strike Venduto")
-            
-            fig.update_layout(
-                yaxis_title="Rendimento a termine del periodo (%)",
-                template="plotly_white",
-                height=400,
-                margin=dict(l=20, r=20, t=20, b=20)
-            )
+            fig.update_layout(yaxis_title="Rendimento a termine del periodo (%)", template="plotly_white", height=400, margin=dict(l=20, r=20, t=20, b=20))
             st.plotly_chart(fig, use_container_width=True)
 
 except Exception as e:
-    st.error(f"Errore critico durante l'esecuzione dell'applicazione: {e}")
+    st.error(f"Errore generale di runtime: {e}")
