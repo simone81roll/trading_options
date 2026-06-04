@@ -5,8 +5,8 @@ import plotly.graph_objects as go
 
 # Configurazione Pagina
 st.set_page_config(
-    page_title="Options Edge Finder v7 — Seasonal Analysis",
-    page_icon="📊",
+    page_title="Options Edge Finder v8 — Dynamic Strike",
+    page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -22,16 +22,22 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🛡️ Options Edge Finder — Seasonal & Regime Engine")
-st.markdown("Studio dinamico delle anomalie mensili e stagionali per strategie **Credit Put Spread** su SPY.")
+st.title("🛡️ Options Edge Finder — Dynamic Volatility Engine")
+st.markdown("Analisi con **Strike Dinamico** regolato sulla Volatilità Storica corrente e sui Regimi di Mercato.")
 
-# SIDEBAR PARAMETRI
-st.sidebar.header("⚙️ Parametri di Configurazione")
+# SIDEBAR PARAMETRI DI VOLATILITÀ
+st.sidebar.header("⚙️ Configurazione Dinamica")
 dte_opzioni = st.sidebar.slider("Giorni alla scadenza (DTE)", min_value=15, max_value=60, value=30, step=5)
 giorni_lavorativi = int(np.round(dte_opzioni * (5/7)))
 
-st.sidebar.subheader("🎯 Definizione degli Strike")
-strike_venduto_pct = st.sidebar.slider("Distanza Strike VENDUTO (%)", min_value=-15.0, max_value=-1.0, value=-5.0, step=0.5) / 100
+st.sidebar.subheader("📊 Parametri di Volatilità (Bande)")
+# Al posto della percentuale fissa, usiamo le Deviazioni Standard (Sigma)
+moltiplicatore_sigma = st.sidebar.slider(
+    "Moltiplicatore Deviazioni Standard (N Sigma)", 
+    min_value=1.0, max_value=3.0, value=1.5, step=0.1,
+    help="Un valore più alto allontana lo strike aumentando la sicurezza, ma riduce il premio incassato."
+)
+
 ampiezza_spread_pct = st.sidebar.slider("Ampiezza dello Spread (%)", min_value=1.0, max_value=10.0, value=2.0, step=0.5) / 100
 
 # CARICAMENTO DATI DA FILE LOCALE CSV
@@ -61,150 +67,132 @@ def carica_dati_locali():
 df = carica_dati_locali()
 
 if not df.empty:
-    # Calcolo indicatori strutturali
+    # 1. Calcolo Volatilità Storica Rolling a 20 giorni (Rendimenti Logaritmici o Percentuali)
+    df['Rendimento_Giornaliero'] = df['Close'].pct_change()
+    # Volatilità periodale basata sui giorni lavorativi del DTE scelto
+    df['Volatila_Rolling'] = df['Rendimento_Giornaliero'].rolling(window=20).std() * np.sqrt(giorni_lavorativi)
+    
+    # 2. Indicatori Strutturali
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
     df['Prezzo_Futuro'] = df['Close'].shift(-giorni_lavorativi)
-    df['Rendimento_Periodo'] = (df['Prezzo_Futuro'] - df['Close']) / df['Close']
+    df['Rendimento_Effettivo_Periodo'] = (df['Prezzo_Futuro'] - df['Close']) / df['Close']
     df['Regime'] = np.where(df['Close'] >= df['SMA_200'], 'Toro (Sopra SMA 200)', 'Orso (Sotto SMA 200)')
     
-    # 🗓️ ESTRAZIONE DELLA STAGIONALITÀ MENSILE
+    # 3. 🗓️ Calcolo Strike Dinamico Storico Giorno per Giorno
+    # Distanza dinamica calcolata in base alla volatilità di quel preciso giorno
+    df['Distanza_Dinamica_Short_Pct'] = - (moltiplicatore_sigma * df['Volatila_Rolling'])
+    df['Strike_Venduto_Dinamico'] = df['Close'] * (1 + df['Distanza_Dinamica_Short_Pct'])
+    
     df['Mese_Num'] = df.index.month
     nomi_mesi = {1: 'Gen', 2: 'Feb', 3: 'Mar', 4: 'Apr', 5: 'Mag', 6: 'Giu', 7: 'Lug', 8: 'Ago', 9: 'Set', 10: 'Ott', 11: 'Nov', 12: 'Dic'}
     df['Mese'] = df['Mese_Num'].map(nomi_mesi)
     
     df_analisi = df.dropna().copy()
     
-    # Dati correnti per l'interfaccia
+    # Estrazione Dati Correnti (Ultima Riga del File)
     prezzo_corrente = float(df['Close'].iloc[-1])
     sma_200_attuale = float(df['SMA_200'].iloc[-1])
     regime_attuale = str(df_analisi['Regime'].iloc[-1])
+    volatila_attuale_pct = float(df_analisi['Volatila_Rolling'].iloc[-1]) * 100
     
-    valore_strike_venduto = np.round(prezzo_corrente * (1 + strike_venduto_pct), 2)
+    # CONCORDANZA SUGGERIMENTO DINAMICO ATTUALE
+    distanza_consigliata_pct = float(df_analisi['Distanza_Dinamica_Short_Pct'].iloc[-1])
+    valore_strike_venduto = np.round(prezzo_corrente * (1 + distanza_consigliata_pct), 2)
     valore_strike_comprato = np.round(valore_strike_venduto * (1 - ampiezza_spread_pct), 2)
     distanza_totale_comprato_pct = ((valore_strike_comprato - prezzo_corrente) / prezzo_corrente) * 100
 
-    # L'INTERFACCIA STATO ATTUALE (Invariata)
-    st.subheader("🚨 Ultimo Stato Rilevato dell'Indice")
-    col_st1, col_st2, col_st3 = st.columns(3)
-    with col_st1: st.metric("Prezzo SPY", f"${prezzo_corrente:.2f}")
+    # INTERFACCIA REALE
+    st.subheader("🚨 Dashboard Analisi Volatilità e Stato di Mercato")
+    col_st1, col_st2, col_st3, col_st4 = st.columns(4)
+    with col_st1: st.metric("Prezzo SPY Corrente", f"${prezzo_corrente:.2f}")
     with col_st2: st.metric("Media Mobile 200gg", f"${sma_200_attuale:.2f}")
+    with col_st4: st.metric(f"Volatilità Attuale ({dte_opzioni} DTE)", f"{volatila_attuale_pct:.2f}%")
     with col_st3:
         if 'Toro' in regime_attuale:
-            st.markdown('<div class="status-card" style="background-color: #28a745; text-align:center;"><b>REGIME: TORO</b></div>', unsafe_allow_html=True)
+            st.markdown('<div class="status-card" style="background-color: #28a745; text-align:center; padding:12px;"><b>REGIME: TORO</b></div>', unsafe_allow_html=True)
         else:
-            st.markdown('<div class="status-card" style="background-color: #dc3545; text-align:center;"><b>REGIME: ORSO</b></div>', unsafe_allow_html=True)
+            st.markdown('<div class="status-card" style="background-color: #dc3545; text-align:center; padding:12px;"><b>REGIME: ORSO</b></div>', unsafe_allow_html=True)
 
-    st.subheader("📋 Configurazione Livelli Operativi")
+    # OUTPUT STRIKE DINAMICI CONSIGLIATI
+    st.subheader("🤖 Algoritmo di Calcolo: Strike Consigliati per il Momento Attuale")
+    st.info(f"L'algoritmo ha analizzato la volatilità recente. Per coprire **{moltiplicatore_sigma} Deviazioni Standard** ad un orizzonte di {dte_opzioni} giorni, ti consiglia una distanza minima di sicurezza dello **{distanza_consigliata_pct * 100:.2f}%**.")
+
     col_c1, col_c2, col_c3 = st.columns(3)
-    with col_c1: st.error(f"🔴 VENDI (Short Put) -> **Strike: ${valore_strike_venduto:.2f}** (-{abs(strike_venduto_pct*100):.1f}%)")
-    with col_c2: st.success(f"🟢 COMPRA (Long Put) -> **Strike: ${valore_strike_comprato:.2f}** ({distanza_totale_comprato_pct:.1f}%)")
+    with col_c1: st.error(f"🔴 APRI SHORT PUT (Vendi)\n**Strike Consigliato: ${valore_strike_venduto:.2f}**\nDistanza Dinamica: {distanza_consigliata_pct*100:.1f}%")
+    with col_c2: st.success(f"🟢 APRI LONG PUT (Compra)\n**Strike Consigliato: ${valore_strike_comprato:.2f}**\nDistanza di Protezione: {distanza_totale_comprato_pct:.1f}%")
     with col_c3:
         ampiezza = np.round(valore_strike_venduto - valore_strike_comprato, 2)
-        st.warning(f"🛡️ RISK PARAMETERS -> **Ampiezza: {ampiezza} punti** (Max Loss: ${ampiezza*100:.2f})")
+        st.warning(f"🛡️ CONFIGURAZIONE RISK\n**Ampiezza Spread: {ampiezza} punti**\nRischio Massimo: ${ampiezza*100:.2f} per contratto")
 
-    # --- NUOVA SEZIONE: ANALISI STAGIONALE AVANZATA ---
-    st.subheader("🗓️ Studio di Stagionalità: Rendimenti e Win Rate per Mese dell'Anno")
-    st.markdown("Questa sezione scompone i dati storici per verificare se esistono mesi intrinsecamente ostili o favorevoli alla strategia.")
+    # --- ANALISI STORICA DEL MODELLO DINAMICO ---
+    st.subheader("📊 Validazione Storica: Come si è comportato lo Strike Dinamico nei Mesi dell'Anno?")
+    st.markdown("A differenza di prima, lo strike si è spostato nel tempo inseguendo il mercato. Vediamo il Win Rate storico reale di questo approccio dinamico:")
 
-    # Funzione di calcolo raggruppato per mese
-    stat_mesi = []
-    ordine_mesi = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
+    # Calcolo statistiche con Strike Dinamico Variabile riga per riga
+    # Un successo si ha quando il rendimento effettivo del periodo è superiore alla distanza dinamica calcolata in quel preciso giorno
+    df_analisi['Successo_Dinamico'] = df_analisi['Rendimento_Effettivo_Periodo'] >= df_analisi['Distanza_Dinamica_Short_Pct']
     
-    # Calcolo della percentuale di perdita massima equivalente
-    pct_equivalente_comprato = (1 + strike_venduto_pct) * (1 - ampiezza_spread_pct) - 1
+    # Calcolo violazione della max loss dinamica
+    pct_max_loss_dinamica = (1 + df_analisi['Distanza_Dinamica_Short_Pct']) * (1 - ampiezza_spread_pct) - 1
+    df_analisi['Max_Loss_Dinamica'] = df_analisi['Rendimento_Effettivo_Periodo'] < pct_max_loss_dinamica
+
+    stat_mesi_dinamici = []
+    ordine_mesi = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
 
     for m in ordine_mesi:
         sub_df = df_analisi[df_analisi['Mese'] == m]
         tot = len(sub_df)
         if tot > 0:
-            violazioni_short = len(sub_df[sub_df['Rendimento_Periodo'] < strike_venduto_pct])
-            violazioni_max = len(sub_df[sub_df['Rendimento_Periodo'] < pct_equivalente_comprato])
+            win_rate = (sub_df['Successo_Dinamico'].sum() / tot) * 100
+            max_loss_rate = (sub_df['Max_Loss_Dinamica'].sum() / tot) * 100
             
-            win_rate = ((tot - violazioni_short) / tot) * 100
-            loss_max_rate = (violazioni_max / tot) * 100
-            rend_medio = sub_df['Rendimento_Periodo'].mean() * 100
-            
-            stat_mesi.append({
+            stat_mesi_dinamici.append({
                 'Mese': m,
-                'Win Rate (%)': np.round(win_rate, 1),
-                'Max Loss Prob (%)': np.round(loss_max_rate, 1),
-                'Rendimento Medio (%)': np.round(rend_medio, 2),
+                'Win Rate Dinamico (%)': np.round(win_rate, 1),
+                'Max Loss Prob (%)': np.round(max_loss_rate, 1),
                 'Scenari': tot
             })
 
-    df_stat_mesi = pd.DataFrame(stat_mesi)
+    df_stat_mesi_dinamici = pd.DataFrame(stat_mesi_dinamici)
 
-    # GRAFICO 1: WIN RATE MENSILE STORICO (GRAFICO A BARRE)
+    # GRAFICO WIN RATE DINAMICO
     fig_bar = go.Figure()
-    
-    # Coloriamo in rosso i mesi storicamente più rischiosi (sotto il 90%) e in verde quelli ottimali
-    colori_barre = ['#28a745' if wr >= 90 else '#ffc107' if wr >= 85 else '#dc3545' for wr in df_stat_mesi['Win Rate (%)']]
+    colori_barre = ['#28a745' if wr >= 92 else '#ffc107' if wr >= 88 else '#dc3545' for wr in df_stat_mesi_dinamici['Win Rate Dinamico (%)']]
     
     fig_bar.add_trace(go.Bar(
-        x=df_stat_mesi['Mese'],
-        y=df_stat_mesi['Win Rate (%)'],
-        text=df_stat_mesi['Win Rate (%)'].astype(str) + '%',
+        x=df_stat_mesi_dinamici['Mese'],
+        y=df_stat_mesi_dinamici['Win Rate Dinamico (%)'],
+        text=df_stat_mesi_dinamici['Win Rate Dinamico (%)'].astype(str) + '%',
         textposition='auto',
         marker_color=colori_barre,
-        name='Win Rate'
     ))
-    
-    fig_bar.add_hline(y=90.0, line_color="black", line_dash="dot", annotation_text="Target Standard (90%)")
-    
+    fig_bar.add_hline(y=90.0, line_color="black", line_dash="dot", annotation_text="Soglia Target (90%)")
     fig_bar.update_layout(
-        title="Percentuale Storica di Successo (Win Rate) del Put Spread Mese per Mese",
-        yaxis=dict(title="Probabilità di Successo (%)", range=[70, 105]),
-        template="plotly_white",
-        height=450
+        title="Win Rate Storico Modello Dinamico (Regolato sulla Volatilità del Giorno di Ingresso)",
+        yaxis=dict(title="Probabilità di Successo (%)", range=[75, 105]),
+        template="plotly_white", height=400
     )
     st.plotly_chart(fig_bar, use_container_width=True)
 
-    # DIVISIONE IN DUE COLONNE PER APPROFONDIMENTI
-    col_g1, col_g2 = st.columns(2)
+    # CONFRONTO REGIME CON APPROCCIO DINAMICO
+    st.subheader("📈 Performance Dinamica condizionata alla SMA 200")
     
-    with col_g1:
-        st.markdown("### 📊 Tabella Metriche Stagionali")
-        st.dataframe(df_stat_mesi.set_index('Mese'), use_container_width=True)
-        st.caption("I dati mostrano il comportamento a scadenza della strategia diviso per il mese solare di INGRESSO a mercato.")
-
-    with col_g2:
-        st.markdown("### 💡 Cosa rivelano questi dati per il tuo trading?")
-        
-        # Identifichiamo dinamicamente il mese peggiore e quello migliore nel dataset
-        mese_peggiore = df_stat_mesi.sort_values(by='Win Rate (%)').iloc[0]
-        mese_migliore = df_stat_mesi.sort_values(by='Win Rate (%)', ascending=False).iloc[0]
-        
-        st.warning(f"⚠️ **Il Mese più critico:** Statisticamente è **{mese_peggiore['Mese']}**, con un Win Rate che scende al **{mese_peggiore['Win Rate (%)']}%**. In questo mese, il rischio di incorrere in una perdita massima (Max Loss) è storicamente del **{mese_peggiore['Max Loss Prob (%)']}%**.")
-        st.success(f"🚀 **Il Mese d'oro:** Statisticamente è **{mese_migliore['Mese']}**, dove la strategia registra un tasso di successo eccezionale del **{mese_migliore['Win Rate (%)']}%**, supportato da un rendimento medio mensile del mercato pari a **{mese_migliore['Rendimento Medio (%)']}%**.")
-        
-        st.markdown("""
-        **Consiglio Operativo per AvaOptions:**
-        * Nelle finestre temporali associate ai mesi critici (tipicamente fine estate/inizio autunno), non aprire spread statici. Valuta di **allontanare lo strike venduto** (es. portandolo a -7% o -8%) o riduci la taglia dei tuoi lotti (*Position Sizing*).
-        * Nei mesi caratterizzati da forte spinta rialzista storica (fine anno/primavera), puoi sfruttare l'alto Edge per incassare premi regolari con massima serenità, poiché i ritracciamenti violenti in grado di abbattere la barriera del 5% sono estremamente rari.
-        """)
-
-    # VECCHIO CONFRONTO REGIME (Mantenuto sotto come validazione strutturale)
-    st.subheader("📈 Distribuzione dei Rendimenti e Regimi di Trend (SMA 200)")
+    tot_scenari = len(df_analisi)
+    win_tot = (df_analisi['Successo_Dinamico'].sum() / tot_scenari) * 100
+    loss_tot = (df_analisi['Max_Loss_Dinamica'].sum() / tot_scenari) * 100
     
-    def calcola_statistiche(dataframe, short_pct, long_pct):
-        totale = len(dataframe)
-        if totale == 0: return 0.0, 0.0, 0
-        violazioni_short = len(dataframe[dataframe['Rendimento_Periodo'] < short_pct])
-        violazioni_massime = len(dataframe[dataframe['Rendimento_Periodo'] < pct_equivalente_comprato])
-        prob_successo = ((totale - violazioni_short) / totale) * 100
-        prob_perdita_massima = (violazioni_massime / totale) * 100
-        return prob_successo, prob_perdita_massima, totale
-
-    prob_tot_succ, prob_tot_loss, n_tot = calcola_statistiche(df_analisi, strike_venduto_pct, ampiezza_spread_pct)
     df_toro = df_analisi[df_analisi['Regime'] == 'Toro (Sopra SMA 200)']
-    prob_toro_succ, prob_toro_loss, n_toro = calcola_statistiche(df_toro, strike_venduto_pct, ampiezza_spread_pct)
+    win_toro = (df_toro['Successo_Dinamico'].sum() / len(df_toro)) * 100 if len(df_toro) > 0 else 0
+    loss_toro = (df_toro['Max_Loss_Dinamica'].sum() / len(df_toro)) * 100 if len(df_toro) > 0 else 0
+    
     df_orso = df_analisi[df_analisi['Regime'] == 'Orso (Sotto SMA 200)']
-    prob_orso_succ, prob_orso_loss, n_orso = calcola_statistiche(df_orso, strike_venduto_pct, ampiezza_spread_pct)
+    win_orso = (df_orso['Successo_Dinamico'].sum() / len(df_orso)) * 100 if len(df_orso) > 0 else 0
+    loss_orso = (df_orso['Max_Loss_Dinamica'].sum() / len(df_orso)) * 100 if len(df_orso) > 0 else 0
 
     col_m1, col_m2, col_m3 = st.columns(3)
     with col_m1:
-        st.markdown(f'<div class="metric-card" style="border-left-color: #6c757d;"><div class="metric-label">Storico Totale</div><div class="metric-value">Successo: {prob_tot_succ:.1f}%</div><div style="font-size:12px; color:#dc3545;">Perdita Max: {prob_tot_loss:.1f}%</div><div style="font-size:11px; color:#6c757d; margin-top:5px;">Su {n_tot} scenari</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card" style="border-left-color: #6c757d;"><div class="metric-label">Totale Storico Dinamico</div><div class="metric-value">Win Rate: {win_tot:.1f}%</div><div style="font-size:12px; color:#dc3545;">Prob. Max Loss: {loss_tot:.1f}%</div></div>', unsafe_allow_html=True)
     with col_m2:
-        st.markdown(f'<div class="metric-card" style="border-left-color: #28a745;"><div class="metric-label">Sopra SMA 200 (Toro)</div><div class="metric-value" style="color: #28a745;">Successo: {prob_toro_succ:.1f}%</div><div style="font-size:12px; color:#dc3545;">Perdita Max: {prob_toro_loss:.1f}%</div><div style="font-size:11px; color:#6c757d; margin-top:5px;">Su {n_toro} scenari</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card" style="border-left-color: #28a745;"><div class="metric-label">In Regime Toro (Dinamico)</div><div class="metric-value" style="color: #28a745;">Win Rate: {win_toro:.1f}%</div><div style="font-size:12px; color:#dc3545;">Prob. Max Loss: {loss_toro:.1f}%</div></div>', unsafe_allow_html=True)
     with col_m3:
-        st.markdown(f'<div class="metric-card" style="border-left-color: #dc3545;"><div class="metric-label">Sotto SMA 200 (Orso)</div><div class="metric-value" style="color: #dc3545;">Successo: {prob_orso_succ:.1f}%</div><div style="font-size:12px; color:#dc3545;">Perdita Max: {prob_orso_loss:.1f}%</div><div style="font-size:11px; color:#6c757d; margin-top:5px;">Su {n_orso} scenari</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric-card" style="border-left-color: #dc3545;"><div class="metric-label">In Regime Orso (Dinamico)</div><div class="metric-value" style="color: #dc3545;">Win Rate: {win_orso:.1f}%</div><div style="font-size:12px; color:#dc3545;">Prob. Max Loss: {loss_orso:.1f}%</div></div>', unsafe_allow_html=True)
