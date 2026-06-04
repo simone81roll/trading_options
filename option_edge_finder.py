@@ -5,45 +5,45 @@ import plotly.graph_objects as go
 
 # Configurazione Pagina
 st.set_page_config(
-    page_title="Options Edge Finder v9 — SMA Distance",
+    page_title="Options Edge Finder — Dynamic Engine",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS Personalizzato
+# CSS Personalizzato per massima leggibilità
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    .status-card { padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 15px; color: white; }
-    .metric-card { background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #0066cc; margin-bottom: 15px; }
-    .metric-label { font-size: 13px; color: #6c757d; font-weight: 500; text-transform: uppercase; }
-    .metric-value { font-size: 22px; color: #1c1c1c; font-weight: bold; }
+    .status-card { padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 15px; text-align: center; font-weight: bold; }
+    .metric-card { background-color: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #0066cc; }
+    .card-title { font-size: 13px; color: #6c757d; font-weight: 500; text-transform: uppercase; margin-bottom: 10px; }
+    .card-value { font-size: 24px; color: #1c1c1c; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🛡️ Options Edge Finder — SMA 200 Distance Analyzer")
-st.markdown("Analisi dell'impatto dell'**estensione percentuale dalla SMA 200** sulle probabilità di successo dello spread.")
+st.title("🛡️ Options Edge Finder — Volatility Assistant")
+st.markdown("Questo strumento analizza la volatilità recente dell'S&P 500 e calcola matematicamente lo strike più sicuro per il tuo Credit Put Spread.")
 
-# SIDEBAR PARAMETRI
-st.sidebar.header("⚙️ Parametri Generali")
+# SIDEBAR SEMPLIFICATA
+st.sidebar.header("⚙️ Impostazioni Opzione")
 dte_opzioni = st.sidebar.slider("Giorni alla scadenza (DTE)", min_value=15, max_value=60, value=30, step=5)
 giorni_lavorativi = int(np.round(dte_opzioni * (5/7)))
 
-moltiplicatore_sigma = st.sidebar.slider("Moltiplicatore Deviazioni Standard (N Sigma)", min_value=1.0, max_value=3.0, value=1.5, step=0.1)
-ampiezza_spread_pct = st.sidebar.slider("Ampiezza dello Spread (%)", min_value=1.0, max_value=10.0, value=2.0, step=0.5) / 100
-
-# 📊 NUOVO FILTRO: DISTANZA DALLA SMA 200
-st.sidebar.subheader("📐 Filtro Estensione SMA 200")
-st.sidebar.markdown("Analizza lo storico filtrando solo i giorni in cui l'indice si trovava a una specifica distanza dalla media:")
-filtro_distanza = st.sidebar.slider(
-    "Prezzo rispetto alla SMA 200 (Soglia %)", 
-    min_value=-15.0, max_value=15.0, value=0.0, step=0.5,
-    help="Se imposti +5%, analizzerai l'efficacia dello spread solo nei giorni in cui il mercato era esteso verso l'alto di almeno il 5% rispetto alla sua media mobile."
+st.sidebar.subheader("🛡️ Livello di Protezione")
+livello_sicurezza = st.sidebar.select_slider(
+    "Profilo di Rischio",
+    options=["Aggressivo (1.0 Sigma)", "Bilanciato (1.5 Sigma)", "Prudente (2.0 Sigma)", "Ultra-Sicuro (2.5 Sigma)"],
+    value="Prudente (2.0 Sigma)"
 )
-tipo_confronto = st.sidebar.radio("Mostra giorni con estensione:", ["Maggiore o uguale alla soglia (>=)", "Minore o uguale alla soglia (<=)"])
 
-# CARICAMENTO DATI LOCALI
+# Mappatura del valore Sigma scelto
+mappa_sigma = {"Aggressivo (1.0 Sigma)": 1.0, "Bilanciato (1.5 Sigma)": 1.5, "Prudente (2.0 Sigma)": 2.0, "Ultra-Sicuro (2.5 Sigma)": 2.5}
+sigma_scelto = mappa_sigma[livello_sicurezza]
+
+ampiezza_spread_pct = st.sidebar.slider("Ampiezza dello Spread (%)", min_value=1.0, max_value=5.0, value=2.0, step=0.5) / 100
+
+# CARICAMENTO DATI LOCALI CSV
 @st.cache_data
 def carica_dati_locali():
     try:
@@ -58,114 +58,75 @@ def carica_dati_locali():
         df_finale = pd.DataFrame(df_puro[colonna_target]).copy()
         df_finale.columns = ['Close']
         df_finale = df_finale.sort_index()
-        df_finale['Close'] = pd.to_numeric(df_finale['Close'], errors='coerce')
-        df_finale = df_finale.dropna()
+        df_finale['Close'] = pd.to_numeric(df_finale['Close'], errors='coerce').dropna()
         return df_finale
     except Exception as e:
-        st.error(f"⚠️ Errore nel file CSV: {e}")
+        st.error(f"⚠️ Errore nel caricamento del file CSV: {e}")
         return pd.DataFrame()
 
 df = carica_dati_locali()
 
 if not df.empty:
-    # Calcolo indicatori base e volatilità
+    # Calcolo Volatilità Storica Rolling
     df['Rendimento_Giornaliero'] = df['Close'].pct_change()
     df['Volatila_Rolling'] = df['Rendimento_Giornaliero'].rolling(window=20).std() * np.sqrt(giorni_lavorativi)
-    df['SMA_200'] = df['Close'].rolling(window=200).mean()
-    df['Prezzo_Futuro'] = df['Close'].shift(-giorni_lavorativi)
-    df['Rendimento_Effettivo_Periodo'] = (df['Prezzo_Futuro'] - df['Close']) / df['Close']
     
-    # 📐 CALCOLO DELLA DISTANZA PERCENTUALE DALLA SMA 200
-    df['Distanza_SMA200_Pct'] = ((df['Close'] - df['SMA_200']) / df['SMA_200']) * 100
+    # Calcolo dello storico delle scadenze
+    df['Prezzo_Futuro'] = df['Close'].shift(-giorni_lavorativi)
+    df['Rendimento_Effettivo'] = (df['Prezzo_Futuro'] - df['Close']) / df['Close']
     
     # Calcolo Strike Dinamico Storico
-    df['Distanza_Dinamica_Short_Pct'] = - (moltiplicatore_sigma * df['Volatila_Rolling'])
-    df['Successo_Dinamico'] = df['Rendimento_Effettivo_Periodo'] >= df['Distanza_Dinamica_Short_Pct']
-    pct_max_loss_dinamica = (1 + df['Distanza_Dinamica_Short_Pct']) * (1 - ampiezza_spread_pct) - 1
-    df['Max_Loss_Dinamica'] = df['Rendimento_Effettivo_Periodo'] < pct_max_loss_dinamica
+    df['Distanza_Dinamica_Pct'] = - (sigma_scelto * df['Volatila_Rolling'])
+    df['Strike_Venduto_Dinamico'] = df['Close'] * (1 + df['Distanza_Dinamica_Pct'])
+    df['Successo_Dinamico'] = df['Rendimento_Effettivo'] >= df['Distanza_Dinamica_Pct']
     
-    df['Mese_Num'] = df.index.month
-    nomi_mesi = {1: 'Gen', 2: 'Feb', 3: 'Mar', 4: 'Apr', 5: 'Mag', 6: 'Giu', 7: 'Lug', 8: 'Ago', 9: 'Set', 10: 'Ott', 11: 'Nov', 12: 'Dic'}
-    df['Mese'] = df['Mese_Num'].map(nomi_mesi)
+    df_analisi = df.dropna().copy()
     
-    df_analisi_totale = df.dropna().copy()
-    
-    # Applicazione dinamica del filtro basato sull'estensione impostata nella sidebar
-    if tipo_confronto == "Maggiore o uguale alla soglia (>=)":
-        df_filtrato = df_analisi_totale[df_analisi_totale['Distanza_SMA200_Pct'] >= filtro_distanza]
-    else:
-        df_filtrato = df_analisi_totale[df_analisi_totale['Distanza_SMA200_Pct'] <= filtro_distanza]
-        
-    # Estrazione Dati Correnti
+    # Estrazione Dati per OGGI (Ultimo record del file)
     prezzo_corrente = float(df['Close'].iloc[-1])
-    sma_200_attuale = float(df['SMA_200'].iloc[-1])
-    distanza_attuale_sma_pct = float(df_analisi_totale['Distanza_SMA200_Pct'].iloc[-1])
-    volatila_attuale_pct = float(df_analisi_totale['Volatila_Rolling'].iloc[-1]) * 100
-    distanza_consigliata_pct = float(df_analisi_totale['Distanza_Dinamica_Short_Pct'].iloc[-1])
+    volatila_attuale_pct = float(df_analisi['Volatila_Rolling'].iloc[-1]) * 100
+    distanza_attuale_pct = float(df_analisi['Distanza_Dinamica_Pct'].iloc[-1]) * 100
     
-    valore_strike_venduto = np.round(prezzo_corrente * (1 + distanza_consigliata_pct), 2)
+    valore_strike_venduto = np.round(prezzo_corrente * (1 + (distanza_attuale_pct/100)), 2)
     valore_strike_comprato = np.round(valore_strike_venduto * (1 - ampiezza_spread_pct), 2)
+    ampiezza_punti = np.round(valore_strike_venduto - valore_strike_comprato, 2)
 
-    # INTERFACCIA CRUSCOTTO REALE
-    st.subheader("🚨 KPI di Mercato ed Estensione Attuale")
-    col_st1, col_st2, col_st3, col_st4 = st.columns(4)
-    with col_st1: st.metric("Prezzo SPY Corrente", f"${prezzo_corrente:.2f}")
-    with col_st2: st.metric("Media Mobile 200gg", f"${sma_200_attuale:.2f}")
-    with col_st3: st.metric("Distanza Attuale dalla SMA 200", f"{distanza_attuale_sma_pct:.2f}%")
-    with col_st4: st.metric(f"Volatilità ({dte_opzioni} DTE)", f"{volatila_attuale_pct:.2f}%")
-
-    # SEGNALE OPERATIVO ATTUALE
-    st.subheader("🤖 Configurazione Algoritmica per Oggi")
-    col_c1, col_c2, col_c3 = st.columns(3)
-    with col_c1: st.error(f"🔴 SHORT PUT -> **Strike: ${valore_strike_venduto:.2f}** ({distanza_consigliata_pct*100:.1f}%)")
-    with col_c2: st.success(f"🟢 LONG PUT -> **Strike: ${valore_strike_comprato:.2f}**")
-    with col_c3: 
-        ampiezza = np.round(valore_strike_venduto - valore_strike_comprato, 2)
-        st.warning(f"🛡️ RISK CONTROL -> **Max Loss Contract: ${ampiezza*100:.2f}**")
-
-    # --- VALIDAZIONE DELLO STUDIO DI ESTENSIONE ---
-    st.subheader(f"📊 Risultati dello Studio di Impatto: Estensione {tipo_confronto[:8]} {filtro_distanza}%")
+    # 1. LIVELLO OPERATIVO IMMEDIATO
+    st.subheader("🎯 Consiglio Operativo per Oggi")
+    st.info(f"In base alla volatilità attuale del mercato ({volatila_attuale_pct:.2f}%), per mantenere un profilo **{livello_sicurezza}** l'algoritmo ti consiglia di posizionare lo strike a una distanza minima del **{distanza_attuale_pct:.1f}%** dal prezzo corrente.")
     
-    if df_filtrato.empty:
-        st.warning("⚠️ Nessun giorno nello storico soddisfa i criteri di estensione impostati. Prova ad ammorbidire i filtri nella sidebar.")
-    else:
-        tot_filtrato = len(df_filtrato)
-        win_filtrato = (df_filtrato['Successo_Dinamico'].sum() / tot_filtrato) * 100
-        loss_filtrato = (df_filtrato['Max_Loss_Dinamica'].sum() / tot_filtrato) * 100
-        
-        tot_globale = len(df_analisi_totale)
-        win_globale = (df_analisi_totale['Successo_Dinamico'].sum() / tot_globale) * 100
-        
-        col_m1, col_m2, col_m3 = st.columns(3)
-        with col_m1:
-            st.markdown(f'<div class="metric-card" style="border-left-color: #6c757d;"><div class="metric-label">Campione Filtrato Analizzato</div><div class="metric-value">{tot_filtrato} Giorni</div><div style="font-size:12px; color:#6c757d;">Rappresentano il {((tot_filtrato/tot_globale)*100):.1f}% dello storico</div></div>', unsafe_allow_html=True)
-        with col_m2:
-            colore_bordo = "#28a745" if win_filtrato >= win_globale else "#ffc107"
-            st.markdown(f'<div class="metric-card" style="border-left-color: {colore_bordo};"><div class="metric-label">Win Rate nel Filtro Selezionato</div><div class="metric-value" style="color: {colore_bordo};">{win_filtrato:.1f}%</div><div style="font-size:12px; color:#dc3545;">Probabilità Max Loss: {loss_filtrato:.1f}%</div></div>', unsafe_allow_html=True)
-        with col_m3:
-            st.markdown(f'<div class="metric-card" style="border-left-color: #0066cc;"><div class="metric-label">Win Rate Globale di Riferimento</div><div class="metric-value" style="color: #0066cc;">{win_globale:.1f}%</div><div style="font-size:12px; color:#6c757d;">Media benchmark senza filtri</div></div>', unsafe_allow_html=True)
+    col_c1, col_c2, col_c3 = st.columns(3)
+    with col_c1:
+        st.markdown(f'<div class="metric-card" style="border-left-color: #dc3545;"><div class="card-title">🔴 Vendi (Short Put)</div><div class="card-value">Strike ${valore_strike_venduto:.2f}</div><div style="font-size:12px; color:#6c757d; margin-top:5px;">Distanza dal prezzo: {distanza_attuale_pct:.1f}%</div></div>', unsafe_allow_html=True)
+    with col_c2:
+        st.markdown(f'<div class="metric-card" style="border-left-color: #28a745;"><div class="card-title">🟢 Compra (Long Put)</div><div class="card-value">Strike ${valore_strike_comprato:.2f}</div><div style="font-size:12px; color:#6c757d; margin-top:5px;">Livello di protezione spread</div></div>', unsafe_allow_html=True)
+    with col_c3:
+        st.markdown(f'<div class="metric-card" style="border-left-color: #ffc107;"><div class="card-title">🛡️ Gestione del Rischio</div><div class="card-value">Ampiezza: {ampiezza_punti} pt</div><div style="font-size:12px; color:#6c757d; margin-top:5px;">Perdita Max: ${ampiezza_punti*100:.2f} a lotto</div></div>', unsafe_allow_html=True)
 
-        # STAGIONALITÀ SUL CAMPIONE FILTRATO
-        stat_mesi_filtrati = []
-        ordine_mesi = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic']
-        for m in ordine_mesi:
-            sub_df = df_filtrato[df_filtrato['Mese'] == m]
-            tot = len(sub_df)
-            if tot > 0:
-                win_m = (sub_df['Successo_Dinamico'].sum() / tot) * 100
-                stat_mesi_filtrati.append({'Mese': m, 'Win Rate (%)': np.round(win_m, 1), 'Scenari': tot})
-        df_stat_filtrati = pd.DataFrame(stat_mesi_filtrati)
+    # 2. STATISTICHE DI SUCCESSO DEL MODELLO
+    st.subheader("📊 Affidabilità Storica di questa impostazione")
+    win_rate_storico = (df_analisi['Successo_Dinamico'].sum() / len(df_analisi)) * 100
+    
+    col_w1, col_w2 = st.columns(2)
+    with col_w1:
+        st.metric("Percentuale di Successo Storica (Win Rate)", f"{win_rate_storico:.1f}%")
+    with col_w2:
+        if win_rate_storico >= 95:
+            st.markdown('<div class="status-card" style="background-color: #28a745; color: white;">LIVELLO DI SICUREZZA ECCEZIONALE</div>', unsafe_allow_html=True)
+        elif win_rate_storico >= 90:
+            st.markdown('<div class="status-card" style="background-color: #0066cc; color: white;">LIVELLO DI SICUREZZA STANDARD OTTIMALE</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="status-card" style="background-color: #ffc107; color: #1c1c1c;">ATTENZIONE: ADATTA I PARAMETRI NELLA SIDEBAR</div>', unsafe_allow_html=True)
 
-        # GRAFICO IMPATTO MENSILE SOTTO FILTRO
-        fig_bar = go.Figure()
-        fig_bar.add_trace(go.Bar(
-            x=df_stat_filtrati['Mese'], y=df_stat_filtrati['Win Rate (%)'],
-            text=df_stat_filtrati['Win Rate (%)'].astype(str) + '%', textposition='auto',
-            marker_color='#0066cc'
-        ))
-        fig_bar.add_hline(y=win_globale, line_color="red", line_dash="dash", annotation_text="Media Globale")
-        fig_bar.update_layout(
-            title="Performance dello Strike Dinamico condizionata al Filtro di Estensione scelto",
-            yaxis=dict(title="Win Rate (%)", range=[75, 105]), template="plotly_white", height=380
-        )
-        st.plotly_chart(fig_bar, use_container_width=True)
+    # 3. GRAFICO VISIVO DI VERIFICA (Ultimi 3 anni per non appesantire)
+    st.subheader("📈 Grafico Visivo dell'Andamento dello Strike")
+    st.markdown("Questo grafico mostra come lo strike consigliato (linea rossa) si sposta da solo per rimanere sempre a distanza di sicurezza sotto il prezzo di mercato (linea blu).")
+    
+    df_recent = df_analisi.tail(750) # Ultimi 3 anni circa
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=df_recent.index, y=df_recent['Close'], name="Prezzo SPY", line=dict(color='#0066cc', width=2)))
+    fig.add_trace(go.Scatter(x=df_recent.index, y=df_recent['Strike_Venduto_Dinamico'], name="Strike Consigliato (Dinamico)", line=dict(color='#dc3545', width=1.5, dash='dash')))
+    
+    fig.update_layout(template="plotly_white", height=450, margin=dict(l=20, r=20, t=20, b=20), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    st.plotly_chart(fig, use_container_width=True)
