@@ -76,7 +76,7 @@ if not df.empty:
     with col_st2: st.metric("Media Mobile 200gg (SMA 200)", f"${sma_200_attuale:.2f}")
     with col_st3: st.metric("Estensione dalla SMA 200 (Distanza)", f"{estensione_attuale:.2f}%")
     
-    # 2. ALGORITMO BACKTEST: CANCELLA I GIORNI DI CONFRONTO
+    # 2. ALGORITMO BACKTEST: GIORNI DI CONFRONTO
     min_filtro = estensione_attuale - tolleranza
     max_filtro = estensione_attuale + tolleranza
     
@@ -91,7 +91,7 @@ if not df.empty:
         scenari_totali = len(giorni_simili)
         toccati_entro_dte = 0
         
-        # Per ogni giorno simile trovato nel passato, cronometriamo quanto ci ha messo il prezzo a scendere al livello della SMA 200 di quel giorno
+        # Cronometriamo quanto ci ha messo il prezzo a scendere al livello della SMA 200 di quel giorno
         for data_inizio, riga in giorni_simili.iterrows():
             livello_target_prezzo = riga['SMA_200']
             
@@ -102,21 +102,18 @@ if not df.empty:
             condizione_tocco = dati_futuri['Close'] <= livello_target_prezzo
             
             if condizione_tocco.any():
-                data_tocco = condizione_tocco.idxmax()
-                # Calcoliamo i giorni di borsa (giorni lavorativi) effettivi passati
+                data_tocco = condition_tocco = condizione_tocco.idxmax()
                 giorni_passati = len(df_analisi.loc[data_inizio:data_tocco]) - 1
                 lista_tempi_tocco.append(giorni_passati)
                 if giorni_passati <= dte_opzioni:
                     toccati_entro_dte += 1
-            else:
-                # Se non ha mai più toccato quel livello nella storia successiva
-                pass
 
         # Calcolo metriche sui tempi di tocco
         if lista_tempi_tocco:
             tempo_minimo = min(lista_tempi_tocco)
             tempo_medio = int(np.mean(lista_tempi_tocco))
-            prob_sopravvivenza_dte = ((scenari_totali - toccati_entro_dte) / scenari_totales) * 100
+            # CORRETTO: rimosso il refuso 'scenari_totales'
+            prob_sopravvivenza_dte = ((scenari_totali - toccati_entro_dte) / scenari_totali) * 100
             
             col_m1, col_m2, col_m3 = st.columns(3)
             with col_m1:
@@ -129,9 +126,9 @@ if not df.empty:
             
             st.markdown(f"### 💡 Verdetto Statistico per il tuo Trading")
             if tempo_minimo > dte_opzioni:
-                st.success(f"🔥 **Edge Clamoroso:** Nella storia dell'S&P 500, quando il mercato si è trovato a questa distanza dalla SMA 200, ci ha messo **almeno {tempo_minimo} giorni** per azzerare l'estensione. Vendendo una scadenza a **{dte_opzioni} giorni**, la matematica dice che il mercato non è mai stato così veloce da poterti colpire prima della scadenza dell'opzione!")
+                st.success(f"🔥 **Edge Clamoroso:** Nella storia dell'S&P 500, quando il mercato si è trovato a questa distanza dalla SMA 200, ci ha messo **almeno {tempo_minimo} giorni** per azzerare l'estensione. Vendendo una scadenza a **{dte_opzioni} giorni**, la borsa non è mai stata così veloce da poterti colpire prima della scadenza dell'opzione!")
             else:
-                st.warning(f"⚠️ **Attenzione al Criterio di Velocità:** Il crollo più rapido registrato da questo livello ha impiegato **{tempo_minimo} giorni** per toccare la media. Poiché il tuo DTE è di {dte_opzioni} giorni, ti trovi all'interno della finestra di pericolo. Storicamente, il livello è stato violato prima della scadenza nel **{(100 - prob_sopravvivenza_dte):.1f}%** dei casi.")
+                st.warning(f"⚠️ **Attenzione al Criterio di Velocità:** Il crollo più rapido registrato da questo livello ha impiegato **{tempo_minimo} giorni** per toccare la media. Poiché il tuo DTE è di {dte_opzioni} giorni, ti trovi all'interno della finestra di pericolo storico. Il livello è stato violato prima della scadenza nel **{(100 - prob_sopravvivenza_dte):.1f}%** dei casi.")
 
             # GRAFICO DI DISTRIBUZIONE DEI TEMPI DI TOCCO
             st.subheader("📊 Distribuzione dei tempi di colmamento del gap (in giorni)")
@@ -151,3 +148,5 @@ if not df.empty:
             )
             st.plotly_chart(fig, use_container_width=True)
             st.caption(f"Nota: Le barre a SINISTRA della linea rossa indicano i casi storici in cui lo spread sarebbe andato in sofferenza prima della scadenza. Le barre a DESTRA rappresentano i trade vincenti.")
+        else:
+            st.info("ℹ️ Nei periodi storici con questa estensione, il mercato non è mai sceso a toccare la media nei giorni successivi analizzati.")
