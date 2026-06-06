@@ -61,11 +61,10 @@ df = carica_dati_locali()
 if not df.empty:
     # Calcolo indicatori base
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
-    # Estensione percentuale attuale dalla media
     df['Estensione_SMA200_Pct'] = ((df['Close'] - df['SMA_200']) / df['SMA_200']) * 100
     df_analisi = df.dropna().copy()
     
-    # 1. RILEVAZIONE STATO ATTUALE (Ultima riga del file)
+    # 1. RILEVAZIONE STATO ATTUALE
     prezzo_corrente = float(df_analisi['Close'].iloc[-1])
     sma_200_attuale = float(df_analisi['SMA_200'].iloc[-1])
     estensione_attuale = float(df_analisi['Estensione_SMA200_Pct'].iloc[-1])
@@ -76,7 +75,7 @@ if not df.empty:
     with col_st2: st.metric("Media Mobile 200gg (SMA 200)", f"${sma_200_attuale:.2f}")
     with col_st3: st.metric("Estensione dalla SMA 200 (Distanza)", f"{estensione_attuale:.2f}%")
     
-    # 2. ALGORITMO BACKTEST: GIORNI DI CONFRONTO
+    # 2. ALGORITMO BACKTEST
     min_filtro = estensione_attuale - tolleranza
     max_filtro = estensione_attuale + tolleranza
     
@@ -91,28 +90,22 @@ if not df.empty:
         scenari_totali = len(giorni_simili)
         toccati_entro_dte = 0
         
-        # Cronometriamo quanto ci ha messo il prezzo a scendere al livello della SMA 200 di quel giorno
         for data_inizio, riga in giorni_simili.iterrows():
             livello_target_prezzo = riga['SMA_200']
-            
-            # Guardiamo i dati successivi a quella data
             dati_futuri = df_analisi.loc[data_inizio:]
-            
-            # Troviamo il primo giorno in cui il prezzo di chiusura è diventato minore o uguale al target
             condizione_tocco = dati_futuri['Close'] <= livello_target_prezzo
             
-            if condizione_tocco.any():
-                data_tocco = condition_tocco = condizione_tocco.idxmax()
+            if condition_tocco := condizione_tocco.any():
+                data_tocco =  condizione_tocco.idxmax()
                 giorni_passati = len(df_analisi.loc[data_inizio:data_tocco]) - 1
                 lista_tempi_tocco.append(giorni_passati)
                 if giorni_passati <= dte_opzioni:
                     toccati_entro_dte += 1
 
         # Calcolo metriche sui tempi di tocco
-        if lista_tempi_tocco:
+        if len(lista_tempi_tocco) > 0:
             tempo_minimo = min(lista_tempi_tocco)
             tempo_medio = int(np.mean(lista_tempi_tocco))
-            # CORRETTO: rimosso il refuso 'scenari_totales'
             prob_sopravvivenza_dte = ((scenari_totali - toccati_entro_dte) / scenari_totali) * 100
             
             col_m1, col_m2, col_m3 = st.columns(3)
@@ -139,7 +132,7 @@ if not df.empty:
                 marker_color='#ff9900',
                 xbins=dict(start=0, end=120, size=5)
             ))
-            fig.add_vline(x=dte_opzioni, line_color="red", line_dash="dash", line_width=2, annotation_text=f"Scadenza della tua Opzione ({dte_opzioni} DTE)")
+            fig.add_vline(x=dte_opzioni, line_color="red", line_dash="dash", line_width=2, annotation_text=f"Scadenza Opzione ({dte_opzioni} DTE)")
             fig.update_layout(
                 template="plotly_white",
                 xaxis=dict(title="Giorni di Borsa necessari per toccare la SMA 200"),
