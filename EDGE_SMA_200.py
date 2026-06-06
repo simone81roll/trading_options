@@ -5,8 +5,8 @@ import plotly.graph_objects as go
 
 # Configurazione Pagina
 st.set_page_config(
-    page_title="Options Edge Finder v11 — Live & Greeks",
-    page_icon="⏱️",
+    page_title="Options Edge v12 — Institutional",
+    page_icon="🏛️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -21,33 +21,28 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("⏱️ Options Edge Finder — Real-Time & Greek Engine")
-st.markdown("Analisi della velocità di riassorbimento combinata con l'Edge delle Greche (Delta) e input in tempo reale.")
+st.title("🏛️ Options Edge Finder — Institutional Confluence")
+st.markdown("Filtro quantitativo multi-livello: Velocità di prezzo, Greche (Delta), Open Interest e Indice VIX.")
 
-# --- SIDEBAR PARAMETRI ---
-st.sidebar.header("🚀 Dati in Tempo Reale (Live)")
-st.sidebar.markdown("Inserisci i valori attuali presi dalla tua piattaforma di trading:")
+# --- SIDEBAR: DATI IN TEMPO REALE E PARAMETRI ---
+st.sidebar.header("🚀 1. Input Dati di Mercato (Live)")
+live_mode = st.sidebar.checkbox("Attiva Input Manuale Live", value=True)
+prezzo_manuale = st.sidebar.number_input("Prezzo S&P 500 Corrente", min_value=1.0, value=6000.0, step=0.5)
+sma_manuale = st.sidebar.number_input("Valore SMA 200", min_value=1.0, value=5600.0, step=0.5)
 
-# INPUT MANUALI
-live_mode = st.sidebar.checkbox("Attiva Input Manuale Live", value=True, help="Disattiva per usare l'ultimo dato disponibile nel CSV storico.")
-prezzo_manuale = st.sidebar.number_input("Prezzo S&P 500 / SPY Corrente", min_value=1.0, value=6000.0, step=0.5)
-sma_manuale = st.sidebar.number_input("Valore Corrente SMA 200", min_value=1.0, value=5600.0, step=0.5)
+st.sidebar.header("⚙️ 2. Struttura dell'Opzione")
+dte_opzioni = st.sidebar.slider("Giorni alla scadenza (DTE)", min_value=15, max_value=60, value=30, step=5)
+delta_target = st.sidebar.slider("Delta Max Strike Venduto", min_value=0.05, max_value=0.30, value=0.15, step=0.01)
 
-st.sidebar.header("⚙️ Orizzonte Temporale Opzione")
-dte_opzioni = st.sidebar.slider("Giorni alla scadenza del tuo Spread (DTE)", min_value=15, max_value=60, value=30, step=5)
+# --- NUOVA SIDEBAR: DATI ISTITUZIONALI ---
+st.sidebar.header("🛡️ 3. Filtri Istituzionali (VIX & OI)")
+vix_corrente = st.sidebar.number_input("Valore VIX Corrente", min_value=9.0, max_value=100.0, value=15.0, step=0.1)
 
-st.sidebar.subheader("📐 Tolleranza Analisi Storica")
-tolleranza = st.sidebar.slider("Flessibilità del filtro (%)", min_value=0.2, max_value=2.0, value=0.5, step=0.1)
+st.sidebar.markdown("**Muri di Opzioni (Open Interest):**")
+oi_strike = st.sidebar.number_input("Open Interest (OI) del tuo Strike", min_value=0, value=15000, step=100, help="Quanti contratti aperti ci sono sullo strike che vuoi vendere?")
+oi_medio = st.sidebar.number_input("OI Medio degli strike vicini", min_value=1, value=3000, step=100, help="Una media a occhio dei volumi sugli strike adiacenti.")
 
-# STRUMENTO GRECHE
-st.sidebar.header("📊 Filtro Greche (Edge Aggiuntivo)")
-delta_target = st.sidebar.slider(
-    "Delta Massimo dello Short Put (Soglia)", 
-    min_value=0.05, max_value=0.30, value=0.15, step=0.01,
-    help="Un Delta di 0.15 corrisponde storicamente a circa l'85% di probabilità di successo teorica stimata dal mercato."
-)
-
-# CARICAMENTO DATI LOCALI CSV
+# CARICAMENTO CSV STORICO (Invariato)
 @st.cache_data
 def carica_dati_locali():
     try:
@@ -58,109 +53,119 @@ def carica_dati_locali():
             df_puro.set_index('Date', inplace=True)
         elif 'Date' in df_puro.index.names:
             df_puro.index = pd.to_datetime(df_puro.index)
-        colonna_target = 'Adj Close' if 'Adj Close' in df_puro.columns else 'Close'
-        df_finale = pd.DataFrame(df_puro[colonna_target]).copy()
+        col_target = 'Adj Close' if 'Adj Close' in df_puro.columns else 'Close'
+        df_finale = pd.DataFrame(df_puro[col_target]).copy()
         df_finale.columns = ['Close']
         df_finale = df_finale.sort_index()
         df_finale['Close'] = pd.to_numeric(df_finale['Close'], errors='coerce').dropna()
         return df_finale
     except Exception as e:
-        st.error(f"⚠️ Errore nel caricamento del file CSV: {e}")
+        st.error(f"⚠️ Errore CSV: {e}")
         return pd.DataFrame()
 
 df = carica_dati_locali()
 
 if not df.empty:
-    # Calcoli storici di base per il confronto
     df['SMA_200'] = df['Close'].rolling(window=200).mean()
     df['Estensione_SMA200_Pct'] = ((df['Close'] - df['SMA_200']) / df['SMA_200']) * 100
     df_analisi = df.dropna().copy()
     
-    # Rilevazione stato (Manuale o CSV)
+    # 1. RILEVAZIONE STATO PREZZI
     if live_mode:
         prezzo_corrente = prezzo_manuale
         sma_200_attuale = sma_manuale
-        estensione_attuale = ((prezzo_corrente - sma_200_attuale) / sma_200_attuale) * 100
-        tipo_stato = "🔴 DATI INSERITI MANUALMENTE (LIVE)"
     else:
         prezzo_corrente = float(df_analisi['Close'].iloc[-1])
         sma_200_attuale = float(df_analisi['SMA_200'].iloc[-1])
-        estensione_attuale = float(df_analisi['Estensione_SMA200_Pct'].iloc[-1])
-        tipo_stato = "🔄 DATI ESTRATTI DALL'ULTIMA RIGA DEL CSV"
+        
+    estensione_attuale = ((prezzo_corrente - sma_200_attuale) / sma_200_attuale) * 100
     
-    st.subheader(f"🚨 Condizione di Mercato Attuale ({tipo_stato})")
+    st.subheader("🚨 1. Motore dei Prezzi e Distanza (Time to Touch)")
     col_st1, col_st2, col_st3 = st.columns(3)
     with col_st1: st.metric("Prezzo Sottostante", f"${prezzo_corrente:.2f}")
-    with col_st2: st.metric("Media Mobile 200gg (SMA 200)", f"${sma_200_attuale:.2f}")
-    with col_st3: st.metric("Estensione Attuale dalla Media", f"{estensione_attuale:.2f}%")
+    with col_st2: st.metric("Media Mobile 200gg", f"${sma_200_attuale:.2f}")
+    with col_st3: st.metric("Estensione Attuale", f"{estensione_attuale:.2f}%")
     
-    # 2. ALGORITMO BACKTEST STORICO SULLA BASE DELL'ESTENSIONE ATTUALE
-    min_filtro = estensione_attuale - tolleranza
-    max_filtro = estensione_attuale + tolleranza
-    
+    # ALGORITMO BACKTEST
+    tolleranza = 0.5
+    min_filtro, max_filtro = estensione_attuale - tolleranza, estensione_attuale + tolleranza
     giorni_simili = df_analisi[(df_analisi['Estensione_SMA200_Pct'] >= min_filtro) & (df_analisi['Estensione_SMA200_Pct'] <= max_filtro)].copy()
     
-    st.subheader(f"📊 Analisi Quantitativa: Finestre storiche con Estensione tra {min_filtro:.1f}% e {max_filtro:.1f}%")
+    prob_sopravvivenza_dte = 0.0 # Valore di default
     
-    if len(giorni_simili) < 5:
-        st.warning("⚠️ Ci sono troppo pochi campioni storici nel CSV con questa estensione esatta. Prova ad aumentare la 'Flessibilità del filtro' nella barra laterale o verifica i prezzi inseriti.")
-    else:
+    if len(giorni_simili) >= 5:
         lista_tempi_tocco = []
-        scenari_totali = len(giorni_simili)
         toccati_entro_dte = 0
         
         for data_inizio, riga in giorni_simili.iterrows():
-            livello_target_prezzo = riga['SMA_200']
-            dati_futuri = df_analisi.loc[data_inizio:]
-            condizione_tocco = dati_futuri['Close'] <= livello_target_prezzo
-            
-            if condizione_tocco.any():
-                data_tocco = condizione_tocco.idxmax()
+            liv_target = riga['SMA_200']
+            cond_tocco = df_analisi.loc[data_inizio:]['Close'] <= liv_target
+            if cond_tocco.any():
+                data_tocco = cond_tocco.idxmax()
                 giorni_passati = len(df_analisi.loc[data_inizio:data_tocco]) - 1
                 lista_tempi_tocco.append(giorni_passati)
-                if giorni_passati <= dte_opzioni:
-                    toccati_entro_dte += 1
-
-        # Mostra metriche se abbiamo dati sul tocco
-        if len(lista_tempi_tocco) > 0:
+                if giorni_passati <= dte_opzioni: toccati_entro_dte += 1
+                    
+        if lista_tempi_tocco:
             tempo_minimo = min(lista_tempi_tocco)
-            tempo_medio = int(np.mean(lista_tempi_tocco))
-            prob_sopravvivenza_dte = ((scenari_totali - toccati_entro_dte) / scenari_totali) * 100
+            prob_sopravvivenza_dte = ((len(giorni_simili) - toccati_entro_dte) / len(giorni_simili)) * 100
             
-            col_m1, col_m2, col_m3 = st.columns(3)
-            with col_m1:
-                st.markdown(f'<div class="metric-card" style="border-left-color: #dc3545;"><div class="card-title">⚡ Crollo più Veloce registrato</div><div class="card-value">{tempo_minimo} Giorni</div><div style="font-size:12px; color:#6c757d; margin-top:5px;">Tempo minimo per azzerare il gap</div></div>', unsafe_allow_html=True)
-            with col_m2:
-                st.markdown(f'<div class="metric-card" style="border-left-color: #0066cc;"><div class="card-title">⏳ Tempo Medio di Ritorno alla Media</div><div class="card-value">{tempo_medio} Giorni</div><div style="font-size:12px; color:#6c757d; margin-top:5px;">Velocità media di convergenza storica</div></div>', unsafe_allow_html=True)
-            with col_m3:
-                colore_wr = "#28a745" if prob_sopravvivenza_dte >= 90 else "#ffc107"
-                st.markdown(f'<div class="metric-card" style="border-left-color: {colore_wr};"><div class="card-title">🎯 Edge Storico a {dte_opzioni} DTE</div><div class="card-value" style="color: {colore_wr};">{prob_sopravvivenza_dte:.1f}%</div><div style="font-size:12px; color:#6c757d; margin-top:5px;">Scenari storici salvi grazie al fattore tempo</div></div>', unsafe_allow_html=True)
-            
-            # --- SEZIONE INTEGRATA DELLE GRECHE ---
-            st.subheader("🛡️ Checklist di Validazione per il Trading (Edge Doppia Sicurezza)")
-            
-            prob_teorica_mercato = (1 - delta_target) * 100
-            
-            col_g1, col_g2 = st.columns(2)
-            with col_g1:
-                st.info(f"💡 **Filtro Greche Attivo:** Stai cercando su AvaOptions uno strike con **Delta massimo di {delta_target:.2f}**. Matematicamente, questo significa che il mercato prezza quel trade con una probabilità di successo stimata del **{prob_teorica_mercato:.1f}%**.")
-            
-            with col_g2:
-                # Regola di stabilità: l'edge storico e quello del delta si supportano a vicenda?
-                if prob_sopravvivenza_dte >= 90.0 and delta_target <= 0.16:
-                    st.success("✅ **CONDIZIONE IDEALE DETECTED:** L'analisi storica mostra un'alta resistenza del tempo e il Delta selezionato è sufficientemente protettivo. Il trade ha un elevatissimo Edge statistico combinato.")
-                else:
-                    st.warning("⚠️ **ATTENZIONE:** Uno dei due pilastri (Velocità storica o Delta scelto) è al limite della sicurezza. Valuta di abbassare il Delta target sulla piattaforma o aumentare il DTE per dare più respiro alla strategia.")
+            st.info(f"**Storico Estensione:** Da questo livello (+/- {tolleranza}%), il crollo più rapido mai registrato ha richiesto **{tempo_minimo} giorni** per toccare la media. Probabilità base del trade (tempo scaduto prima del crollo): **{prob_sopravvivenza_dte:.1f}%**.")
+    else:
+        st.warning("Pochi dati storici esatti per questa specifica estensione.")
 
-            # GRAFICO
-            st.subheader("📊 Distribuzione dei tempi storici di riassorbimento dell'estensione")
-            fig = go.Figure()
-            fig.add_trace(go.Histogram(
-                x=lista_tempi_tocco, name="Giorni impiegati", marker_color='#ff9900',
-                xbins=dict(start=0, end=120, size=5)
-            ))
-            fig.add_vline(x=dte_opzioni, line_color="red", line_dash="dash", line_width=2, annotation_text=f"Scadenza Opzione ({dte_opzioni} DTE)")
-            fig.update_layout(template="plotly_white", xaxis=dict(title="Giorni necessari per toccare la SMA 200"), yaxis=dict(title="Casi storici rilevati"), height=350)
-            st.plotly_chart(fig, use_container_width=True)
+    st.divider()
+
+    # 2. SEZIONE ANALISI ISTITUZIONALE
+    st.subheader("🏛️ 2. Confluenza Istituzionale (Greche, Volumi e VIX)")
+    st.markdown("Valutazione dei parametri di liquidità e paura del mercato per approvare l'ingresso a mercato.")
+
+    col_i1, col_i2, col_i3 = st.columns(3)
+
+    # A) VALUTAZIONE DELTA (Probabilità teorica del mercato)
+    with col_i1:
+        prob_teorica = (1 - delta_target) * 100
+        if delta_target <= 0.16:
+            st.markdown(f'<div class="metric-card" style="border-left-color: #28a745;"><div class="card-title">1️⃣ Edge del Delta</div><div class="card-value" style="color: #28a745;">{delta_target:.2f} (Sicuro)</div><div style="font-size:12px; color:#6c757d; margin-top:5px;">Prob. Mercato: {prob_teorica:.1f}%</div></div>', unsafe_allow_html=True)
         else:
-            st.info("ℹ️ Nei periodi storici con questa estensione, il mercato non è mai sceso a toccare la media nei giorni successivi analizzati.")
+            st.markdown(f'<div class="metric-card" style="border-left-color: #dc3545;"><div class="card-title">1️⃣ Edge del Delta</div><div class="card-value" style="color: #dc3545;">{delta_target:.2f} (Aggressivo)</div><div style="font-size:12px; color:#6c757d; margin-top:5px;">Rischio ITM elevato</div></div>', unsafe_allow_html=True)
+
+    # B) VALUTAZIONE OPEN INTEREST (I Muri)
+    with col_i2:
+        rapporto_oi = oi_strike / oi_medio if oi_medio > 0 else 1
+        if rapporto_oi >= 3.0:
+            colore_oi, testo_oi, sub_oi = "#28a745", f"{rapporto_oi:.1f}x", "Muro Istituzionale Solido"
+        elif rapporto_oi >= 1.5:
+            colore_oi, testo_oi, sub_oi = "#0066cc", f"{rapporto_oi:.1f}x", "Supporto Standard"
+        else:
+            colore_oi, testo_oi, sub_oi = "#dc3545", f"{rapporto_oi:.1f}x", "Strike Vulnerabile / Poco liquido"
+            
+        st.markdown(f'<div class="metric-card" style="border-left-color: {colore_oi};"><div class="card-title">2️⃣ Scudo Open Interest</div><div class="card-value" style="color: {colore_oi};">{testo_oi} OI Medio</div><div style="font-size:12px; color:#6c757d; margin-top:5px;">{sub_oi}</div></div>', unsafe_allow_html=True)
+
+    # C) VALUTAZIONE VIX (Indice Paura)
+    with col_i3:
+        if vix_corrente < 13.0:
+            colore_vix, testo_vix, sub_vix = "#dc3545", f"{vix_corrente}", "Premi troppo bassi. Rischio espansione."
+        elif 13.0 <= vix_corrente <= 18.0:
+            colore_vix, testo_vix, sub_vix = "#0066cc", f"{vix_corrente}", "Volatilità Neutrale. Premi equi."
+        else:
+            colore_vix, testo_vix, sub_vix = "#28a745", f"{vix_corrente}", "Alta Volatilità. Edge a favore del venditore."
+            
+        st.markdown(f'<div class="metric-card" style="border-left-color: {colore_vix};"><div class="card-title">3️⃣ Valore VIX (Paura)</div><div class="card-value" style="color: {colore_vix};">{testo_vix}</div><div style="font-size:12px; color:#6c757d; margin-top:5px;">{sub_vix}</div></div>', unsafe_allow_html=True)
+
+    # 3. VERDETTO FINALE COMBINATO
+    st.divider()
+    st.subheader("🎯 Semaforo Operativo Finale")
+    
+    punteggio = 0
+    if prob_sopravvivenza_dte >= 85: punteggio += 1
+    if delta_target <= 0.16: punteggio += 1
+    if rapporto_oi >= 2.0: punteggio += 1
+    if vix_corrente >= 13.0: punteggio += 1
+
+    if punteggio == 4:
+        st.success("🟢 **VIA LIBERA (CONFLUENZA TOTALE):** Tutte le metriche (Storico, Greche, Volumi e VIX) sono allineate a tuo favore. Il rischio statistico è minimizzato al massimo livello possibile per questo Trade.")
+    elif punteggio == 3:
+        st.info("🟡 **APPROVATO CON CAUTELA:** Hai 3 fattori a favore su 4. Il setup è buono, ma c'è un elemento (es. VIX basso o OI debole) che non offre la massima copertura. Gestisci con attenzione l'ampiezza dello spread.")
+    else:
+        st.error(f"🔴 **TRADE SCONSIGLIATO (Punteggio {punteggio}/4):** Troppi parametri non allineati. Le probabilità non giocano nettamente a tuo favore o i premi non giustificano il rischio strutturale preso.")
